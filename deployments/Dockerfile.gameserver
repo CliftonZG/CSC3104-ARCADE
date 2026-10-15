@@ -7,6 +7,9 @@ FROM golang:1.24-alpine AS builder
 
 WORKDIR /src
 
+# Enable automatic toolchain resolution if newer dependencies are introduced
+ENV GOTOOLCHAIN=auto
+
 # Leverage Docker cache layer for dependencies
 COPY go.mod go.sum ./
 RUN go mod download
