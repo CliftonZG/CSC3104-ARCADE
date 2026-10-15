@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+
+# ------------------------------------------------------------------------------
+# Build Stage
+# ------------------------------------------------------------------------------
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /src
+
+# Leverage Docker cache layer for dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source tree
+COPY . .
+
+# Compile statically linked binary with stripped debug symbols (-s -w)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w -extldflags '-static'" \
+    -trimpath \
+    -o /bin/gameserver ./cmd/gameserver
+
+# ------------------------------------------------------------------------------
+# Production Distroless Runtime Stage
+# ------------------------------------------------------------------------------
+FROM gcr.io/distroless/static-debian12:nonroot
+
+USER nonroot:nonroot
+WORKDIR /app
+
+COPY --from=builder --chown=nonroot:nonroot /bin/gameserver /app/gameserver
+
+# Expose HTTP metrics/health port
+EXPOSE 8081
+
+ENTRYPOINT ["/app/gameserver"]
