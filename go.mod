@@ -2,7 +2,11 @@ module github.com/CSC3104-ARCADE
 
 go 1.24
 
-require github.com/prometheus/client_golang v1.20.5
+require (
+	github.com/alicebob/miniredis/v2 v2.40.0
+	github.com/prometheus/client_golang v1.20.5
+	github.com/redis/go-redis/v9 v9.22.0
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -12,6 +16,8 @@ require (
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.63.0 // indirect
 	github.com/prometheus/procfs v0.16.0 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )

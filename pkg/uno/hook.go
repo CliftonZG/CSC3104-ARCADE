@@ -47,7 +47,7 @@ func (r *hookRegistry) Dispatch(prev, next *State, summary ActionSummary) error 
 
 	for _, h := range active {
 		if err := h(prev, next, summary); err != nil {
-			return fmt.Errorf("%w: %v", ErrHookFailed, err)
+			return fmt.Errorf("%w: %w", ErrHookFailed, err)
 		}
 	}
 	return nil

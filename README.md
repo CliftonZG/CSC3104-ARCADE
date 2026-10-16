@@ -38,6 +38,10 @@ CSC3104-ARCADE/
 │   │   ├── state.go            # Immutable State struct & cloning
 │   │   └── validator.go        # 108-card conservation law invariant verification
 │   ├── replication/            # Redis snapshot streaming & Lua fencing (Benny)
+│   │   ├── store.go            # Fenced writes, epoch claims, takeover, snapshot age, stream tail
+│   │   ├── replicator.go       # Primary-side MoveHook publisher with fail-fast fencing
+│   │   ├── scripts/            # commit.lua (fenced write), claim.lua (epoch CAS)
+│   │   └── fencing_test.go     # Split-brain validation suite
 │   ├── detector/               # UDP heartbeat & dual-validation timeout monitor (Marcus)
 │   ├── proxy/                  # Dynamic upstream session router (Brian)
 │   ├── protocol/               # Shared wire envelopes, actions & events
@@ -92,4 +96,10 @@ make bench
 
 # Start gameserver locally with Prometheus & pprof enabled (:8081)
 make run-server
+
+# Run replication tests against a real Redis 7+ (default: in-memory miniredis)
+make test-redis REDIS_TEST_ADDR=localhost:6379
+
+# Start gameserver as a replicating primary (Redis at localhost:6379)
+make run-server-redis
 ```
