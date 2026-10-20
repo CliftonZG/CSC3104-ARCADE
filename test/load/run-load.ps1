@@ -39,7 +39,7 @@ if (-not $OutDir) { $OutDir = Join-Path $here ("results/" + (Get-Date -Format "y
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 # -Kubectl may be a command with arguments, e.g. "minikube kubectl --".
-$kubectlParts = $Kubectl -split '\s+' | Where-Object { $_ }
+$kubectlParts = @($Kubectl -split '\s+' | Where-Object { $_ })
 $kubectlExe = $kubectlParts[0]
 $kubectlPre = @()
 if ($kubectlParts.Count -gt 1) { $kubectlPre = $kubectlParts[1..($kubectlParts.Count - 1)] }
