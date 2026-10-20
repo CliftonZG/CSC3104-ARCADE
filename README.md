@@ -17,7 +17,9 @@ CSC3104-ARCADE/
 │   │   └── main.go
 │   ├── proxy/                  # Client-facing WebSocket routing proxy (Brian)
 │   │   └── main.go
-│   └── chaos/                  # Automated fault-injection CLI (Sam)
+│   ├── chaos/                  # Automated fault-injection CLI (Sam)
+│   │   └── main.go
+│   └── loadprobe/              # In-cluster CPU/memory/latency probe for load tests (Tan Yan Ting)
 │       └── main.go
 ├── pkg/
 │   ├── uno/                    # Pure Uno state machine, snapshots, invariants (Clifton)
@@ -44,17 +46,22 @@ CSC3104-ARCADE/
 │   │   └── fencing_test.go     # Split-brain validation suite
 │   ├── detector/               # UDP heartbeat & dual-validation timeout monitor (Marcus)
 │   ├── proxy/                  # Dynamic upstream session router (Brian)
+│   ├── fleet/                  # Pod identity, peer discovery, startup role arbitration, /role, pod labels (Tan Yan Ting)
+│   ├── loadgen/                # Synthetic self-play driver + Prometheus text parser (Tan Yan Ting)
 │   ├── protocol/               # Shared wire envelopes, actions & events
 │   │   └── envelope.go
 │   └── metrics/                # Prometheus metrics collectors (Sam)
 │       └── metrics.go
-├── deployments/                # Multi-stage distroless Docker configurations (Tan Yan Ting)
+├── deployments/                # Multi-stage, multi-arch distroless images (Tan Yan Ting)
 │   ├── Dockerfile.gameserver
-│   └── Dockerfile.proxy
-├── k8s/                        # Kubernetes manifests & Headless Services (Tan Yan Ting)
+│   ├── Dockerfile.proxy
+│   └── Dockerfile.loadprobe
+├── k8s/                        # Kustomize manifests: paired StatefulSets, headless Service, Redis, RBAC (Tan Yan Ting)
+│   ├── base/  overlays/{demo,load}/  components/network-policy/  load/  kind-cluster.yaml
+│   └── README.md               # Deployment guide & fleet design
 ├── test/                       # End-to-end integration and load testing suites
 │   ├── e2e/                    # Failover chaos verification
-│   └── load/                   # Concurrent match scaling tests
+│   └── load/                   # 10/50/100-pair scaling & pprof profiling (Tan Yan Ting)
 ├── .golangci.yml               # Strict linter configuration
 ├── Makefile                    # Build, test, race, bench automation
 └── go.mod                      # Root module: github.com/CSC3104-ARCADE
@@ -102,4 +109,10 @@ make test-redis REDIS_TEST_ADDR=localhost:6379
 
 # Start gameserver as a replicating primary (Redis at localhost:6379)
 make run-server-redis
+
+# Containers & Kubernetes (details: k8s/README.md)
+make docker-build          # arcade/{gameserver,proxy,loadprobe}:dev
+make k8s-demo              # 3 self-playing Primary/Standby pairs in namespace "arcade"
+make k8s-status            # pods with their live arcade.io/role and arcade.io/match labels
+make load-test             # 10/50/100-pair scalability run (Windows: test/load/run-load.ps1)
 ```
