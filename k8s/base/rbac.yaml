@@ -1,0 +1,60 @@
+# The gameserver mirrors its live role onto its own pod labels
+# (arcade.io/role=primary|backup) after startup arbitration and failover,
+# so it may read and patch pods in its own namespace, and nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: arcade-gameserver
+  labels:
+    app.kubernetes.io/name: arcade-gameserver
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: arcade-gameserver-pod-labeler
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: arcade-gameserver-pod-labeler
+subjects:
+  - kind: ServiceAccount
+    name: arcade-gameserver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: arcade-gameserver-pod-labeler
+---
+# The proxy discovers the current primary of each match by label
+# (arcade.io/role=primary) or by calling GET /role on the pair.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: arcade-proxy
+  labels:
+    app.kubernetes.io/name: arcade-proxy
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: arcade-proxy-pod-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: arcade-proxy-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: arcade-proxy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: arcade-proxy-pod-reader

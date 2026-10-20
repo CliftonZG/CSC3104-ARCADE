@@ -1,0 +1,50 @@
+# Redis accepts connections only from gameservers and the load probe.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: arcade-redis-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: arcade-redis
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: arcade-gameserver
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: arcade-loadprobe
+      ports:
+        - port: 6379
+          protocol: TCP
+---
+# Gameservers: heartbeats and /role between partners, HTTP from the proxy and
+# the load probe. Nothing else may reach them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: arcade-gameserver-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: arcade-gameserver
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: arcade-gameserver
+      ports:
+        - port: 9000
+          protocol: UDP
+        - port: 8081
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: arcade-proxy
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: arcade-loadprobe

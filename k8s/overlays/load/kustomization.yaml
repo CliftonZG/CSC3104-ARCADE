@@ -1,0 +1,25 @@
+# Phase 2 load test base: synthetic self-play at 5 moves/s per match.
+# test/load/run-load.ps1 applies this, then scales both StatefulSets to
+# 10, 50 and 100 pairs and runs the in-cluster load probe at each step.
+#   kubectl apply -k k8s/overlays/load
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+configMapGenerator:
+  - name: arcade-gameserver-config
+    behavior: merge
+    literals:
+      - AUTOPLAY_INTERVAL=200ms
+patches:
+  # Redis is shared by every pair; give it room so it is not the first thing
+  # to throttle (its CPU is reported separately by the probe).
+  - target:
+      kind: StatefulSet
+      name: arcade-redis
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: {cpu: 250m, memory: 128Mi}
+          limits: {cpu: "2", memory: 1Gi}
