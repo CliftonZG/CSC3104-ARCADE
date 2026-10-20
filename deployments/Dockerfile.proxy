@@ -1,34 +1,59 @@
 # syntax=docker/dockerfile:1
+#
+# ARCADE client-facing WebSocket proxy
+# Owner: Tan Yan Ting (container images & Kubernetes fleet)
+#
+# Build (from repo root):
+#   docker build -f deployments/Dockerfile.proxy -t arcade/proxy:dev .
+# Multi-arch (CI):
+#   docker buildx build --platform linux/amd64,linux/arm64 -f deployments/Dockerfile.proxy .
 
 # ------------------------------------------------------------------------------
-# Build Stage
+# Build stage: always runs on the build machine's native platform and
+# cross-compiles for the target, so multi-arch builds do not need QEMU to
+# emulate the Go compiler (much faster) and the arm64 image really contains
+# an arm64 binary.
 # ------------------------------------------------------------------------------
-FROM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 WORKDIR /src
 
-ENV GOTOOLCHAIN=auto
+# Enable automatic toolchain resolution if newer dependencies are introduced
+ENV GOTOOLCHAIN=auto CGO_ENABLED=0
 
+# Dependency layer: only invalidated when go.mod / go.sum change.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-s -w -extldflags '-static'" \
+# Static, stripped (-s -w), reproducible (-trimpath) binary.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
+    -ldflags="-s -w" \
     -trimpath \
-    -o /bin/proxy ./cmd/proxy
+    -o /out/proxy ./cmd/proxy
 
 # ------------------------------------------------------------------------------
-# Production Distroless Runtime Stage
+# Runtime stage: distroless static (no shell, no package manager, CA certs and
+# tzdata only), running as the unprivileged "nonroot" user (uid 65532).
 # ------------------------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
 
-USER nonroot:nonroot
+LABEL org.opencontainers.image.title="arcade-proxy" \
+    org.opencontainers.image.description="ARCADE client-facing WebSocket proxy" \
+    org.opencontainers.image.source="https://github.com/CliftonZG/CSC3104-ARCADE"
+
+USER 65532:65532
 WORKDIR /app
 
-COPY --from=builder --chown=nonroot:nonroot /bin/proxy /app/proxy
+COPY --from=builder --chown=65532:65532 /out/proxy /app/proxy
 
-EXPOSE 8080
+EXPOSE 8080/tcp
 
 ENTRYPOINT ["/app/proxy"]

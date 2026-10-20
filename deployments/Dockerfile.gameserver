@@ -1,39 +1,61 @@
 # syntax=docker/dockerfile:1
+#
+# ARCADE Uno game server (primary / standby pod)
+# Owner: Tan Yan Ting (container images & Kubernetes fleet)
+#
+# Build (from repo root):
+#   docker build -f deployments/Dockerfile.gameserver -t arcade/gameserver:dev .
+# Multi-arch (CI):
+#   docker buildx build --platform linux/amd64,linux/arm64 -f deployments/Dockerfile.gameserver .
 
 # ------------------------------------------------------------------------------
-# Build Stage
+# Build stage: always runs on the build machine's native platform and
+# cross-compiles for the target, so multi-arch builds do not need QEMU to
+# emulate the Go compiler (much faster) and the arm64 image really contains
+# an arm64 binary.
 # ------------------------------------------------------------------------------
-FROM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 WORKDIR /src
 
 # Enable automatic toolchain resolution if newer dependencies are introduced
-ENV GOTOOLCHAIN=auto
+ENV GOTOOLCHAIN=auto CGO_ENABLED=0
 
-# Leverage Docker cache layer for dependencies
+# Dependency layer: only invalidated when go.mod / go.sum change.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
-# Copy source tree
 COPY . .
 
-# Compile statically linked binary with stripped debug symbols (-s -w)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-s -w -extldflags '-static'" \
+# Static, stripped (-s -w), reproducible (-trimpath) binary.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
+    -ldflags="-s -w" \
     -trimpath \
-    -o /bin/gameserver ./cmd/gameserver
+    -o /out/gameserver ./cmd/gameserver
 
 # ------------------------------------------------------------------------------
-# Production Distroless Runtime Stage
+# Runtime stage: distroless static (no shell, no package manager, CA certs and
+# tzdata only), running as the unprivileged "nonroot" user (uid 65532).
 # ------------------------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
 
-USER nonroot:nonroot
+LABEL org.opencontainers.image.title="arcade-gameserver" \
+    org.opencontainers.image.description="ARCADE Uno game server (primary / standby pod)" \
+    org.opencontainers.image.source="https://github.com/CliftonZG/CSC3104-ARCADE"
+
+USER 65532:65532
 WORKDIR /app
 
-COPY --from=builder --chown=nonroot:nonroot /bin/gameserver /app/gameserver
+COPY --from=builder --chown=65532:65532 /out/gameserver /app/gameserver
 
-# Expose HTTP metrics/health port
-EXPOSE 8081
+# 8081/tcp: metrics, health, readiness, /role, pprof
+# 9000/udp: heartbeat between the Primary/Standby pair (pkg/detector)
+EXPOSE 8081/tcp 9000/udp
 
 ENTRYPOINT ["/app/gameserver"]
