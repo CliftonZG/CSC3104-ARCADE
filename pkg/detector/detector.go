@@ -324,7 +324,7 @@ func (d *Detector) notifyProxy(ctx context.Context, matchID string, epoch int64)
 		d.logf("[DETECTOR] Warning: proxy route notification failed: %v", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusOK {
 		d.logf("[DETECTOR] Proxy route successfully updated: match=%s epoch=%d primary=%s", matchID, epoch, primaryAddr)
