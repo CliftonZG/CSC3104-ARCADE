@@ -1,0 +1,9 @@
+# Optional least-privilege network rules. Only enforced by a CNI that
+# implements NetworkPolicy (e.g. Calico, Cilium, recent kindnet); Docker
+# Desktop's built-in cluster ignores them. Enable from an overlay with:
+#   components:
+#     - ../../components/network-policy
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - network-policy.yaml

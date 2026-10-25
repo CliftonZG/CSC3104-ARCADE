@@ -1,0 +1,17 @@
+# Demo / progress presentation: 3 pairs, each primary self-plays one move per
+# second so `kubectl logs` and /metrics show live gameplay.
+#   kubectl apply -k k8s/overlays/demo
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+replicas:
+  - name: arcade-gs-a
+    count: 3
+  - name: arcade-gs-b
+    count: 3
+configMapGenerator:
+  - name: arcade-gameserver-config
+    behavior: merge
+    literals:
+      - AUTOPLAY_INTERVAL=1s

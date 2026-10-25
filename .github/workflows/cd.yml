@@ -82,3 +82,25 @@ jobs:
           labels: ${{ steps.meta-proxy.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Extract Metadata for Load Probe
+        id: meta-loadprobe
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/loadprobe
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+            type=ref,event=tag
+
+      - name: Build & Push Load Probe Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployments/Dockerfile.loadprobe
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-loadprobe.outputs.tags }}
+          labels: ${{ steps.meta-loadprobe.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,157 @@
+# Gameserver StatefulSet "arcade-gs-a": the pods that START as PRIMARY.
+#
+# Pair i = arcade-gs-a-i (initial primary) + arcade-gs-b-i (initial backup),
+# serving match-<i> (zero-padded to 3 digits). Both StatefulSets always have
+# the same replica count; scale them together to change the number of pairs:
+#     kubectl -n arcade scale sts arcade-gs-a arcade-gs-b --replicas=<pairs>
+#
+# ROLE is only the initial assignment. On startup the pod asks its partner
+# (GET /role) and yields if the partner was promoted while it was down; after
+# that the failure detector owns role changes. The live role is published on
+# the pod label arcade.io/role and at GET /role. See pkg/fleet.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: arcade-gs-a
+  labels:
+    app.kubernetes.io/name: arcade-gameserver
+    app.kubernetes.io/component: gameserver
+    arcade.io/set: "a"
+spec:
+  serviceName: arcade-gs
+  replicas: 1
+  # Pods are independent matches: start/stop them all at once instead of
+  # one-by-one (OrderedReady would take minutes to scale to 100 pairs).
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: arcade-gameserver
+      arcade.io/set: "a"
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: arcade-gameserver
+        app.kubernetes.io/component: gameserver
+        arcade.io/set: "a"
+        arcade.io/role: primary # initial value; the pod rewrites it on promotion/demotion
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: arcade-gameserver
+      terminationGracePeriodSeconds: 10
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          # Keep the two halves of a pair on different nodes when the cluster
+          # has more than one: a node failure must not take out both the
+          # primary and its standby. matchLabelKeys adds the incoming pod's own
+          # apps.kubernetes.io/pod-index (its pair number) to the selector, so
+          # arcade-gs-a-7 only repels its partner arcade-gs-b-7.
+          # Soft (preferred) so single-node clusters like Docker Desktop still work.
+          # Requires Kubernetes >= 1.31 (MatchLabelKeysInPodAffinity, beta).
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: arcade-gameserver
+                matchLabelKeys:
+                  - apps.kubernetes.io/pod-index
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: arcade-gameserver
+              arcade.io/set: "a"
+      containers:
+        - name: gameserver
+          image: arcade/gameserver:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: arcade-gameserver-config
+          env:
+            - name: ROLE
+              value: primary
+            - name: PEER_STATEFULSET
+              value: arcade-gs-b
+            - name: GOVERNING_SERVICE
+              value: arcade-gs
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            # Go 1.24 does not read cgroup CPU/memory limits by itself: size the
+            # scheduler and the GC from the container limits.
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.cpu
+                  divisor: "1"
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: "1"
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+            - name: heartbeat
+              containerPort: 9000
+              protocol: UDP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            # Requests sized from the Phase 2 measurements (test/load/README.md):
+            # a primary at 5 moves/s uses ~3 mcores and ~17 MiB RSS, a standby
+            # well under 1 mcore and ~12 MiB. Small requests let 100 pairs
+            # (200 pods) schedule on a laptop; limits leave room for bursts.
+            requests:
+              cpu: 5m
+              memory: 24Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

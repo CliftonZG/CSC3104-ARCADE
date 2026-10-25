@@ -1,0 +1,40 @@
+# ARCADE base deployment: Redis, one Primary/Standby gameserver pair, proxy.
+#   kubectl apply -k k8s/base            (or an overlay: k8s/overlays/demo, k8s/overlays/load)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: arcade
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: arcade
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - redis.yaml
+  - gameserver-service.yaml
+  - gameserver-a.yaml
+  - gameserver-b.yaml
+  - proxy.yaml
+
+configMapGenerator:
+  # Shared gameserver settings. Kustomize appends a content hash to the name,
+  # so changing a value here rolls both StatefulSets automatically.
+  - name: arcade-gameserver-config
+    literals:
+      - REDIS_ADDR=arcade-redis:6379
+      - MATCH_PREFIX=match
+      - HTTP_PORT=8081
+      - HEARTBEAT_PORT=9000
+      # Synthetic self-play (pkg/loadgen); empty = off. Overlays turn it on.
+      - AUTOPLAY_INTERVAL=
+
+# Retarget images without editing the manifests, e.g. to the CD pipeline's GHCR images:
+#   cd k8s/base && kustomize edit set image arcade/gameserver=ghcr.io/cliftonzg/csc3104-arcade/gameserver:latest
+images:
+  - name: arcade/gameserver
+    newTag: dev
+  - name: arcade/proxy
+    newTag: dev

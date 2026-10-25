@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1
+#
+# ARCADE load-test probe (Phase 2 resource profiling)
+# Owner: Tan Yan Ting (container images & Kubernetes fleet)
+#
+# Build (from repo root):
+#   docker build -f deployments/Dockerfile.loadprobe -t arcade/loadprobe:dev .
+# Multi-arch (CI):
+#   docker buildx build --platform linux/amd64,linux/arm64 -f deployments/Dockerfile.loadprobe .
+
+# ------------------------------------------------------------------------------
+# Build stage: always runs on the build machine's native platform and
+# cross-compiles for the target, so multi-arch builds do not need QEMU to
+# emulate the Go compiler (much faster) and the arm64 image really contains
+# an arm64 binary.
+# ------------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+WORKDIR /src
+
+# Enable automatic toolchain resolution if newer dependencies are introduced
+ENV GOTOOLCHAIN=auto CGO_ENABLED=0
+
+# Dependency layer: only invalidated when go.mod / go.sum change.
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+# Static, stripped (-s -w), reproducible (-trimpath) binary.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
+    -ldflags="-s -w" \
+    -trimpath \
+    -o /out/loadprobe ./cmd/loadprobe
+
+# ------------------------------------------------------------------------------
+# Runtime stage: distroless static (no shell, no package manager, CA certs and
+# tzdata only), running as the unprivileged "nonroot" user (uid 65532).
+# ------------------------------------------------------------------------------
+FROM gcr.io/distroless/static-debian12:nonroot
+
+LABEL org.opencontainers.image.title="arcade-loadprobe" \
+    org.opencontainers.image.description="ARCADE load-test probe (Phase 2 resource profiling)" \
+    org.opencontainers.image.source="https://github.com/CliftonZG/CSC3104-ARCADE"
+
+USER 65532:65532
+WORKDIR /app
+
+COPY --from=builder --chown=65532:65532 /out/loadprobe /app/loadprobe
+
+# No ports: runs as a one-shot Kubernetes Job (k8s/load/loadprobe-job.yaml).
+
+ENTRYPOINT ["/app/loadprobe"]

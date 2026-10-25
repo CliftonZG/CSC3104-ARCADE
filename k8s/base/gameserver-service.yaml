@@ -1,0 +1,32 @@
+# Headless Service governing BOTH gameserver StatefulSets.
+#
+# clusterIP: None means no load-balancing VIP: DNS returns individual pods and
+# every pod gets a stable name
+#     <pod>.arcade-gs.<namespace>.svc.cluster.local
+# e.g. arcade-gs-b-7.arcade-gs.arcade.svc.cluster.local. Pod a-7 sends its UDP
+# heartbeats to exactly that name (pkg/fleet derives it from its own ordinal),
+# so pod-to-pod traffic is deterministic and survives pod rescheduling.
+#
+# publishNotReadyAddresses: the partner must be resolvable while it is still
+# starting (and while it is failing its readiness probe), otherwise the
+# heartbeat/arbitration traffic that decides readiness could never begin.
+apiVersion: v1
+kind: Service
+metadata:
+  name: arcade-gs
+  labels:
+    app.kubernetes.io/name: arcade-gameserver
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: arcade-gameserver
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+      protocol: TCP
+    - name: heartbeat
+      port: 9000
+      targetPort: heartbeat
+      protocol: UDP

@@ -1,0 +1,12 @@
+# Keep the Docker build context small and the dependency layer cache stable.
+.git
+.github
+.idea
+*.iml
+bin/
+coverage.txt
+bench-results.txt
+k8s/
+test/load/results/
+_yanting_drop/
+**/*.md

@@ -143,3 +143,24 @@ jobs:
         with:
           name: binaries-${{ matrix.targetos }}-${{ matrix.targetarch }}
           path: bin/
+
+  k8s-manifests:
+    name: Kubernetes Manifest Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin kubeconform
+
+      - name: Render & validate kustomizations (strict schema, K8s 1.31)
+        run: |
+          for d in k8s/base k8s/overlays/demo k8s/overlays/load; do
+            echo "::group::$d"
+            kubectl kustomize "$d" | kubeconform -strict -summary -kubernetes-version 1.31.0 -
+            echo "::endgroup::"
+          done
+          sed -e 's/__PAIRS__/10/g' -e 's/__WINDOW__/60s/g' k8s/load/loadprobe-job.yaml \
+            | kubeconform -strict -summary -kubernetes-version 1.31.0 -

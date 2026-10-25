@@ -1,0 +1,91 @@
+# Redis 7: snapshot stream + Lua epoch fencing (pkg/replication).
+# The fencing epoch MUST survive a Redis restart (see pkg/replication/README.md),
+# so append-only persistence is on and the data lives on a PersistentVolume.
+apiVersion: v1
+kind: Service
+metadata:
+  name: arcade-redis
+  labels:
+    app.kubernetes.io/name: arcade-redis
+spec:
+  selector:
+    app.kubernetes.io/name: arcade-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: arcade-redis
+  labels:
+    app.kubernetes.io/name: arcade-redis
+    app.kubernetes.io/component: datastore
+spec:
+  serviceName: arcade-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: arcade-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: arcade-redis
+        app.kubernetes.io/component: datastore
+    spec:
+      securityContext:
+        # The official entrypoint starts as root only to chown the volume
+        # (portable across hostpath/local-path provisioners), then execs
+        # redis-server as the unprivileged "redis" user.
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - --appendonly
+            - "yes"
+            - --appendfsync
+            - everysec
+            - --save
+            - ""
+            - --maxclients
+            - "10000"
+            # Reachable only inside the cluster (ClusterIP Service, optional
+            # NetworkPolicy); protected mode would refuse non-loopback clients.
+            - --protected-mode
+            - "no"
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
