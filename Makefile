@@ -43,10 +43,9 @@ KUBECTL ?= kubectl
 PAIRS ?= 10 50 100
 
 docker-build:
-	docker build -f deployments/Dockerfile.gameserver -t arcade/gameserver:$(IMAGE_TAG) .
-	docker build -f deployments/Dockerfile.proxy -t arcade/proxy:$(IMAGE_TAG) .
-	docker build -f deployments/Dockerfile.loadprobe -t arcade/loadprobe:$(IMAGE_TAG) .
-
+	DOCKER_BUILDKIT=1 docker build -f deployments/Dockerfile.gameserver -t arcade/gameserver:$(IMAGE_TAG) .
+	DOCKER_BUILDKIT=1 docker build -f deployments/Dockerfile.proxy -t arcade/proxy:$(IMAGE_TAG) .
+	DOCKER_BUILDKIT=1 docker build -f deployments/Dockerfile.loadprobe -t arcade/loadprobe:$(IMAGE_TAG) .
 # Render every kustomization (needs kubectl >= 1.27; kubeconform optional).
 k8s-validate:
 	for d in k8s/base k8s/overlays/demo k8s/overlays/load; do $(KUBECTL) kustomize $$d > /dev/null || exit 1; done

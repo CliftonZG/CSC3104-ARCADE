@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/CSC3104-ARCADE/pkg/detector"
 	"github.com/CSC3104-ARCADE/pkg/fleet"
 	"github.com/CSC3104-ARCADE/pkg/loadgen"
 	"github.com/CSC3104-ARCADE/pkg/metrics"
@@ -72,24 +73,32 @@ func main() {
 	}
 
 	var engine *uno.Game
-	switch {
-	case *redisAddr == "":
+	var store *replication.Store
+
+	// Connect to Redis for both Primary and Standby pods if redisAddr is provided
+	if *redisAddr != "" {
+		store, err = connectStoreWithRetry(ctx, *redisAddr, 60*time.Second)
+		if err != nil {
+			log.Fatalf("[GAMESERVER] Failed to connect to Redis: %v", err)
+		}
+	} else {
 		log.Printf("[GAMESERVER] Replication disabled (no -redis / REDIS_ADDR)")
+	}
+
+	switch {
+	case store == nil:
 		engine, err = newGame()
 	case *role == "primary":
-		var store *replication.Store
-		if store, err = connectStoreWithRetry(ctx, *redisAddr, 60*time.Second); err == nil {
-			engine, err = startPrimary(ctx, store, *matchID, replication.Format(*snapshotFormat), newGame,
-				func(fe *replication.FencedError) {
-					// A newer primary owns the match; this pod's state is no longer authoritative.
-					log.Printf("[REPLICATION] %v. Stepping down.", fe)
-					status.Demote()
-					select {
-					case sigCh <- syscall.SIGTERM:
-					default:
-					}
-				})
-		}
+		engine, err = startPrimary(ctx, store, *matchID, replication.Format(*snapshotFormat), newGame,
+			func(fe *replication.FencedError) {
+				// A newer primary owns the match; this pod's state is no longer authoritative.
+				log.Printf("[REPLICATION] %v. Stepping down.", fe)
+				status.Demote()
+				select {
+				case sigCh <- syscall.SIGTERM:
+				default:
+				}
+			})
 		if err == nil {
 			if epoch, eerr := store.CurrentEpoch(ctx, *matchID); eerr == nil {
 				status.SetEpoch(epoch)
@@ -157,6 +166,54 @@ func main() {
 
 	go func() {
 		log.Printf("[GAMESERVER] Telemetry & pprof HTTP server listening on :%d", *httpPort)
+		// -------------------------------------------------------------------------
+		// Game WebSocket Handler & Failure Detector Integration (Marcus & Team)
+		// -------------------------------------------------------------------------
+		getEngine := func() *uno.Game { return engine }
+		wsHandler := NewGameServerWS(status, getEngine)
+		mux.Handle("/ws", wsHandler)
+
+		// Automatically step down and close player sockets with 1012 on demotion
+		status.OnChange(func(info fleet.RoleInfo) {
+			if info.Role == fleet.RoleBackup {
+				wsHandler.CloseAllDemoted()
+			}
+		})
+
+		proxyAdminURL := os.Getenv("PROXY_ADMIN_URL")
+		if proxyAdminURL == "" {
+			proxyAdminURL = "http://arcade-proxy:9090"
+		}
+
+		det := detector.New(detector.Config{
+			Identity:        identity,
+			Status:          status,
+			Store:           store,
+			ProxyAdminURL:   proxyAdminURL,
+			ProxyAdminToken: os.Getenv("ARCADE_ADMIN_TOKEN"),
+			OnTakeover: func(epoch int64, newGame *uno.Game) {
+				log.Printf("[TAKEOVER] Standby successfully promoted to Primary at Epoch=%d", epoch)
+				if newGame != nil {
+					engine = newGame
+				}
+				// Hook replication for subsequent primary moves
+				rep := replication.NewReplicator(store, replication.ReplicatorConfig{
+					MatchID: identity.MatchID,
+					Epoch:   epoch,
+					Format:  replication.Format(*snapshotFormat),
+					OnFenced: func(fe *replication.FencedError) {
+						status.Demote()
+					},
+				})
+				engine.RegisterHook(rep.Hook())
+			},
+			Logf: log.Printf,
+		})
+
+		if err := det.Start(ctx); err != nil {
+			log.Printf("[DETECTOR] Warning: detector failed to start: %v", err)
+		}
+		defer det.Stop()
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[GAMESERVER] HTTP server error: %v", err)
 		}

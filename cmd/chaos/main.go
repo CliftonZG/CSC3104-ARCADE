@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
+	"syscall"
 )
 
 func main() {
@@ -22,6 +24,16 @@ func main() {
 
 	switch *mode {
 	case "sigkill":
+		// If target is an integer PID, terminate directly via syscall.Kill
+		if pid, err := strconv.Atoi(*target); err == nil {
+			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+				log.Fatalf("[CHAOS] kill -9 on PID %d failed: %v", pid, err)
+			}
+			log.Printf("[CHAOS] Successfully sent SIGKILL to PID %d", pid)
+			return
+		}
+
+		// Otherwise target is a pattern name
 		cmd := exec.Command("pkill", "-9", "-f", *target)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
