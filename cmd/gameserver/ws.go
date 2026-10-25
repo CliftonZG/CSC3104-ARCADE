@@ -53,7 +53,7 @@ func (ws *GameServerWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[WS] Accept error: %v", err)
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	ws.mu.Lock()
 	ws.conns[conn] = playerID
