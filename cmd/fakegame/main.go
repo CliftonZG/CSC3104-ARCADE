@@ -10,6 +10,8 @@
 //
 //	/ws?match=<id>   the game socket (what the proxy dials)
 //	POST /demote     step down: close every socket with 1012, then refuse new ones with 503
+//	GET /role        {"role":"primary|backup","epoch":N,...}, what the proxy's -discover-pods asks
+//	POST /promote?epoch=N   become primary at epoch N (what the failure detector does on a takeover)
 //	/healthz
 package main
 
@@ -22,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -70,14 +73,21 @@ func (s *store) inc(match string) (int, error) {
 func main() {
 	name := flag.String("name", "A", "name shown in replies")
 	listen := flag.String("listen", "127.0.0.1:9001", "listen address")
+	role0 := flag.String("role", "primary", "initial role reported on /role: primary or backup")
+	epoch0 := flag.Int64("epoch", 1, "initial epoch reported on /role")
 	state := flag.String("state", "", "shared state file (stand-in for Redis); empty keeps counters in memory only")
 	flag.Parse()
 
 	st := &store{path: *state}
 	var (
+		roleMu sync.Mutex
+		role   = *role0
+		epoch  = *epoch0
+	)
+	var (
 		mu      sync.Mutex
 		conns   = map[*websocket.Conn]struct{}{}
-		demoted bool
+		demoted = *role0 == "backup" // a backup refuses handshakes with 503, like a real standby
 		// proc makes "apply a message and send its reply" exclusive with
 		// stepping down, so a message is never applied whose reply can no
 		// longer be sent.
@@ -86,6 +96,28 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprintln(w, "ok") })
+	mux.HandleFunc("GET /role", func(w http.ResponseWriter, _ *http.Request) {
+		roleMu.Lock()
+		r, e := role, epoch
+		roleMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"pod": *name, "role": r, "epoch": e, "ready": true})
+	})
+	mux.HandleFunc("POST /promote", func(w http.ResponseWriter, r *http.Request) {
+		e, err := strconv.ParseInt(r.URL.Query().Get("epoch"), 10, 64)
+		if err != nil || e < 0 {
+			http.Error(w, "need ?epoch=N", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		demoted = false
+		mu.Unlock()
+		roleMu.Lock()
+		role, epoch = "primary", e
+		roleMu.Unlock()
+		log.Printf("[%s] promoted to primary at epoch %d", *name, e)
+		_, _ = fmt.Fprintln(w, "promoted")
+	})
 	mux.HandleFunc("POST /demote", func(w http.ResponseWriter, _ *http.Request) {
 		proc.Lock() // wait for in-flight messages to finish, reply included
 		mu.Lock()
@@ -99,6 +131,9 @@ func main() {
 		for _, c := range cs {
 			go func(c *websocket.Conn) { _ = c.Close(websocket.StatusServiceRestart, "stepping down") }(c)
 		}
+		roleMu.Lock()
+		role = "backup"
+		roleMu.Unlock()
 		log.Printf("[%s] demoted; closing %d sockets with 1012", *name, len(cs))
 		_, _ = fmt.Fprintln(w, "demoted")
 	})

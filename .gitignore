@@ -28,3 +28,11 @@ Thumbs.db
 
 # Load-test output (test/load/run-load.*)
 test/load/results/
+k8s/base/proxy.yaml
+.gitignore
+results/chaos.txt
+results/proxy.txt
+results/wsclient.txt
+results/a0.txt
+results/b0.txt
+results/pods.txt

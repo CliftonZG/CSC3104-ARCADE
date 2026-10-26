@@ -167,6 +167,7 @@ func (s *session) loop() {
 
 		route, ok := s.p.table.Lookup(s.matchID)
 		if !ok {
+			s.p.hint(s.matchID)
 			s.wait(w, outageStart, 0) // until a route shows up or the outage cap
 			continue
 		}
@@ -188,6 +189,7 @@ func (s *session) loop() {
 			}
 			s.p.stats.DialFailures.Add(1)
 			s.log.Info("cannot reach primary", "addr", route.Addr, "epoch", route.Epoch, "err", err)
+			s.p.hint(s.matchID)
 			s.wait(w, outageStart, s.backoff(attempt))
 			attempt++
 			continue
@@ -237,6 +239,7 @@ func (s *session) loop() {
 				return
 			}
 			s.log.Info("lost primary", "addr", route.Addr, "epoch", route.Epoch, "err", res.err)
+			s.p.hint(s.matchID)
 			outageStart = time.Now()
 			if time.Since(up.born) < time.Second {
 				attempt++

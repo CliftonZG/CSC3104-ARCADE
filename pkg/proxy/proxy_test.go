@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -77,6 +78,12 @@ type fakeGame struct {
 	mute       bool
 	flap       bool // accept, then immediately close with 1012
 
+	// what GET /role answers; role == "" means the pod has no /role endpoint
+	role      string
+	roleEpoch int64
+	roleMatch string
+	notReady  bool
+
 	killOnce sync.Once
 }
 
@@ -95,7 +102,32 @@ func newFakeGame(t *testing.T, name string) *fakeGame {
 
 func (g *fakeGame) Addr() string { return g.ln.Addr().String() }
 
+// setRole makes the pod answer GET /role like a real game pod does.
+func (g *fakeGame) setRole(role string, epoch int64, match string) {
+	g.mu.Lock()
+	g.role, g.roleEpoch, g.roleMatch = role, epoch, match
+	g.mu.Unlock()
+}
+
+func (g *fakeGame) serveRole(w http.ResponseWriter) {
+	g.mu.Lock()
+	role, epoch, match, ready := g.role, g.roleEpoch, g.roleMatch, !g.notReady
+	g.mu.Unlock()
+	if role == "" {
+		http.NotFound(w, nil)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"pod": g.name, "match_id": match, "role": role, "epoch": epoch, "ready": ready,
+	})
+}
+
 func (g *fakeGame) handle(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == RolePath {
+		g.serveRole(w)
+		return
+	}
 	g.mu.Lock()
 	g.reqs = append(g.reqs, gameReq{Header: r.Header.Clone(), Path: r.URL.Path, Query: r.URL.RawQuery})
 	n := len(g.reqs)

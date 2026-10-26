@@ -125,6 +125,8 @@ func TestRunRejectsBadConfiguration(t *testing.T) {
 		{"-route", "garbage"},
 		{"-route", "bad id=1@h:1"},
 		{"-log-level", "loud"},
+		{"-discover"}, // no sets configured
+		{"-discover-pods", "not-an-address"},
 	} {
 		if err := run(context.Background(), args, &sink); err == nil {
 			t.Errorf("run(%v) succeeded, want an error", args)
@@ -144,5 +146,63 @@ func TestCompatibilityFlags(t *testing.T) {
 	o, err = parseFlags([]string{"-default-upstream", "x:1"}, &sink)
 	if err != nil || o.defaultUpstream != "x:1" || o.listen != ":8080" {
 		t.Fatalf("defaults broken: %+v, %v", o, err)
+	}
+}
+
+func TestDiscoveryFlags(t *testing.T) {
+	var sink bytes.Buffer
+
+	// Off by default.
+	o, err := parseFlags(nil, &sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := o.discoveryConfig(); cfg != nil || err != nil {
+		t.Fatalf("discovery should be off by default, got %+v, %v", cfg, err)
+	}
+
+	// The Kubernetes layout, with the environment the manifest provides.
+	t.Setenv("GAMESERVER_SETS", "arcade-gs-a,arcade-gs-b")
+	t.Setenv("GAMESERVER_SERVICE", "arcade-gs")
+	t.Setenv("GAMESERVER_HTTP_PORT", "8081")
+	t.Setenv("POD_NAMESPACE", "arcade")
+	o, err = parseFlags([]string{"-discover"}, &sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := o.discoveryConfig()
+	if err != nil || cfg == nil {
+		t.Fatalf("discoveryConfig = %+v, %v", cfg, err)
+	}
+	got := cfg.Targets("match-003")
+	want := []string{
+		"arcade-gs-a-3.arcade-gs.arcade.svc.cluster.local:8081",
+		"arcade-gs-b-3.arcade-gs.arcade.svc.cluster.local:8081",
+	}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("targets = %v, want %v", got, want)
+	}
+
+	// A flag beats the environment.
+	o, err = parseFlags([]string{"-discover", "-discover-namespace", "other", "-discover-port", "9000"}, &sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = o.discoveryConfig()
+	if got := cfg.Targets("match-0"); got[0] != "arcade-gs-a-0.arcade-gs.other.svc.cluster.local:9000" {
+		t.Fatalf("flags did not override the environment: %v", got)
+	}
+
+	// Static candidates for local runs apply to every match.
+	o, err = parseFlags([]string{"-discover-pods", "127.0.0.1:9001", "-discover-pods", "127.0.0.1:9002"}, &sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = o.discoveryConfig()
+	if err != nil || cfg == nil {
+		t.Fatalf("discoveryConfig = %+v, %v", cfg, err)
+	}
+	if got := cfg.Targets("anything"); len(got) != 2 {
+		t.Fatalf("static targets = %v", got)
 	}
 }

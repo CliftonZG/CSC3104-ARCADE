@@ -35,11 +35,12 @@ type Proxy struct {
 	// are reached directly) and never follows redirects.
 	httpClient *http.Client
 
-	mu       sync.Mutex
-	sessions map[*session]struct{}
-	pending  int // handshakes in progress, counted against MaxSessions
-	draining bool
-	wg       sync.WaitGroup
+	mu        sync.Mutex
+	routeHint func(matchID string) // set by a Discoverer; called when a client has no usable primary
+	sessions  map[*session]struct{}
+	pending   int // handshakes in progress, counted against MaxSessions
+	draining  bool
+	wg        sync.WaitGroup
 }
 
 // New creates a proxy with its own empty route table.
@@ -69,6 +70,38 @@ func (p *Proxy) Table() *Table { return p.table }
 
 // Stats returns the live counters.
 func (p *Proxy) Stats() *Stats { return &p.stats }
+
+// setRouteHint registers fn to be called (without blocking) when a client of a
+// match has no route or has just lost its primary.
+func (p *Proxy) setRouteHint(fn func(matchID string)) {
+	p.mu.Lock()
+	p.routeHint = fn
+	p.mu.Unlock()
+}
+
+func (p *Proxy) hint(matchID string) {
+	p.mu.Lock()
+	fn := p.routeHint
+	p.mu.Unlock()
+	if fn != nil {
+		fn(matchID)
+	}
+}
+
+// activeMatches returns the distinct match ids of the connected clients.
+func (p *Proxy) activeMatches() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	seen := make(map[string]struct{}, len(p.sessions))
+	out := make([]string, 0, len(p.sessions))
+	for s := range p.sessions {
+		if _, ok := seen[s.matchID]; !ok {
+			seen[s.matchID] = struct{}{}
+			out = append(out, s.matchID)
+		}
+	}
+	return out
+}
 
 // Sessions returns the number of connected clients.
 func (p *Proxy) Sessions() int {

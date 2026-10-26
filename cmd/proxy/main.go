@@ -40,6 +40,17 @@ type options struct {
 	logJSON                                      bool
 	cfg                                          proxy.Config
 	shutdownTimeout                              time.Duration
+
+	discover      bool
+	discoverPods  listFlag
+	discoverSets  string
+	discoverSvc   string
+	discoverNS    string
+	discoverPort  int
+	discoverMatch string
+	discoverDom   string
+	discoverEvery time.Duration
+	discoverTO    time.Duration
 }
 
 func parseFlags(args []string, stderr io.Writer) (*options, error) {
@@ -60,6 +71,17 @@ func parseFlags(args []string, stderr io.Writer) (*options, error) {
 	fs.StringVar(&o.logLevel, "log-level", "info", "debug, info, warn or error")
 	fs.BoolVar(&o.logJSON, "log-json", false, "log as JSON")
 	fs.DurationVar(&o.shutdownTimeout, "shutdown-timeout", 10*time.Second, "how long to wait for clients to close on SIGTERM")
+
+	fs.BoolVar(&o.discover, "discover", false, "find each match's primary by asking its pods for GET /role (Kubernetes StatefulSet layout; see -discover-* flags)")
+	fs.Var(&o.discoverPods, "discover-pods", "candidate pods host:port for every match, instead of the Kubernetes layout (repeatable; local runs)")
+	fs.StringVar(&o.discoverSets, "discover-sets", os.Getenv("GAMESERVER_SETS"), "comma-separated StatefulSet names of the pair, e.g. arcade-gs-a,arcade-gs-b (default $GAMESERVER_SETS)")
+	fs.StringVar(&o.discoverSvc, "discover-service", envOr("GAMESERVER_SERVICE", "arcade-gs"), "headless service of the game pods (default $GAMESERVER_SERVICE or arcade-gs)")
+	fs.StringVar(&o.discoverNS, "discover-namespace", envOr("POD_NAMESPACE", "arcade"), "namespace of the game pods (default $POD_NAMESPACE or arcade)")
+	fs.IntVar(&o.discoverPort, "discover-port", envInt("GAMESERVER_HTTP_PORT", 8081), "game pod HTTP port (default $GAMESERVER_HTTP_PORT or 8081)")
+	fs.StringVar(&o.discoverMatch, "discover-match-prefix", "match-", "match ids are <prefix><pair number>, e.g. match-007 is pair 7")
+	fs.StringVar(&o.discoverDom, "discover-cluster-domain", "cluster.local", "cluster DNS domain")
+	fs.DurationVar(&o.discoverEvery, "discover-interval", time.Second, "how often matches with clients are polled")
+	fs.DurationVar(&o.discoverTO, "discover-timeout", 800*time.Millisecond, "timeout of one GET /role")
 
 	c := &o.cfg
 	fs.DurationVar(&c.DialTimeout, "dial-timeout", 0, "timeout for one attempt to reach a game pod (default 3s)")
@@ -86,6 +108,48 @@ func parseFlags(args []string, stderr io.Writer) (*options, error) {
 		o.listen = fmt.Sprintf(":%d", o.port)
 	}
 	return &o, nil
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func envInt(key string, def int) int {
+	if n, err := strconv.Atoi(os.Getenv(key)); err == nil && n > 0 {
+		return n
+	}
+	return def
+}
+
+// discoveryConfig returns the discovery settings, or nil if discovery is off.
+func (o *options) discoveryConfig() (*proxy.DiscoveryConfig, error) {
+	if !o.discover && len(o.discoverPods) == 0 {
+		return nil, nil
+	}
+	cfg := &proxy.DiscoveryConfig{Interval: o.discoverEvery, Timeout: o.discoverTO}
+	if len(o.discoverPods) > 0 {
+		for _, a := range o.discoverPods {
+			if err := proxy.ValidAddr(a); err != nil {
+				return nil, fmt.Errorf("-discover-pods: %w", err)
+			}
+		}
+		cfg.Targets = proxy.StaticTargets(o.discoverPods...)
+		return cfg, nil
+	}
+	var sets []string
+	for _, s := range strings.Split(o.discoverSets, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			sets = append(sets, s)
+		}
+	}
+	if len(sets) == 0 {
+		return nil, errors.New("-discover needs -discover-sets (or $GAMESERVER_SETS), e.g. arcade-gs-a,arcade-gs-b")
+	}
+	cfg.Targets = proxy.PodTargets(o.discoverMatch, sets, o.discoverSvc, o.discoverNS, o.discoverDom, o.discoverPort)
+	return cfg, nil
 }
 
 // parseRoute parses "match=epoch@host:port".
@@ -158,6 +222,10 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 			return fmt.Errorf("-route %q: %w", r, err)
 		}
 	}
+	dcfg, err := o.discoveryConfig()
+	if err != nil {
+		return err
+	}
 	if o.insecureOrigin {
 		log.Warn("origin checking is disabled")
 	}
@@ -182,6 +250,11 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 	go func() { errc <- fmt.Errorf("client listener: %w", clientSrv.ListenAndServe()) }()
 	if adminSrv != nil {
 		go func() { errc <- fmt.Errorf("admin listener: %w", adminSrv.ListenAndServe()) }()
+	}
+	if dcfg != nil {
+		d := proxy.NewDiscoverer(p, *dcfg)
+		go d.Run(ctx)
+		log.Info("discovering primaries via GET /role", "interval", dcfg.Interval)
 	}
 	log.Info("proxy started", "listen", o.listen, "admin", o.admin, "default_upstream", o.defaultUpstream)
 

@@ -21,6 +21,14 @@ spec:
       port: 8080
       targetPort: ws
       nodePort: 30080
+    # Takeover notifications from the failure detector (POST /admin/route).
+    # Discovery (-discover below) finds primaries on its own; this makes the
+    # reroute instant. NOTE: on a LoadBalancer Service this port is reachable
+    # from outside the cluster too; set ARCADE_ADMIN_TOKEN on the proxy and the
+    # gameservers, or move it to a separate ClusterIP Service for production.
+    - name: admin
+      port: 9090
+      targetPort: admin
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -53,7 +61,13 @@ spec:
         - name: proxy
           image: arcade/proxy:dev
           imagePullPolicy: IfNotPresent
-          args: ["-port=8080"]
+          args:
+            - "-port=8080"
+            - "-admin=0.0.0.0:9090"
+            # Find each match's primary by asking its pods (GET /role) and
+            # follow the highest epoch. Reads GAMESERVER_SERVICE,
+            # GAMESERVER_SETS, GAMESERVER_HTTP_PORT and POD_NAMESPACE below.
+            - "-discover"
           env:
             # Fleet discovery hints for the proxy (same layout as pkg/fleet).
             - name: GAMESERVER_SERVICE
@@ -69,6 +83,8 @@ spec:
           ports:
             - name: ws
               containerPort: 8080
+            - name: admin
+              containerPort: 9090
           readinessProbe:
             httpGet:
               path: /healthz

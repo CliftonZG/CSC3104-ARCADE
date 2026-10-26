@@ -21,7 +21,7 @@ browser ══ ws ══> proxy ══ ws ══> game pod (primary, epoch 1)   
 | `pkg/proxy` | route table, sessions, retargeting, fence, admin API |
 | `cmd/fakegame` | stand-in game pod (a shared counter) for demos and tests |
 | `cmd/wsclient` | N simulated players; the Phase 2 "client connection continuity" test |
-| `scripts/e2e.sh` | real processes, `kill -9` the primary (`crash`) or step it down (`graceful`) |
+| `scripts/e2e.sh` | real processes, `kill -9` the primary (`crash`), step it down (`graceful`), or promote the standby with no notice at all (`discover`) |
 | `scripts/browser_e2e.py` | real Chromium `WebSocket` through a `kill -9` failover |
 
 Requires Go 1.24+ (the repo's `go.mod`) and one new dependency, [`github.com/coder/websocket`](https://github.com/coder/websocket) v1.8.15:
@@ -44,7 +44,7 @@ for i in $(seq 0 19); do
 done
 ```
 
-Or just `scripts/e2e.sh crash` / `scripts/e2e.sh graceful`.
+Or just `scripts/e2e.sh crash` / `graceful` / `discover`.
 
 ## Interfaces (the parts other people code against)
 
@@ -86,6 +86,25 @@ for msg := range sub.Channel() {
 // key match:{id}:primary for each live match, or a missed message is never recovered.
 ```
 
+### Discovery: the proxy asks the pods (`-discover`)
+
+Takeover notifications can be lost, late, or never sent (a pod that becomes primary while starting up
+sends none). With `-discover` the proxy also finds each match's primary itself:
+
+* For every match that has a connected client it calls `GET /role` on the pair's pods every
+  `-discover-interval` (default 1s), and immediately when a client has no route or its primary just failed.
+* Pod `<set>-<n>` serves `match-<n>`; the address is `<set>-<n>.<service>.<ns>.svc.cluster.local:<port>`,
+  the same string the failure detector announces, so a notification and a poll for the same epoch agree.
+* A pod counts only if it reports `"role":"primary"` and `"ready":true`. Among those the **highest epoch**
+  wins, so a fenced pod that still believes it is primary (stale epoch) is ignored. Two different pods at the
+  same epoch: the route is left alone and a warning is logged.
+* Discovery and notifications share one rule (a route is replaced only by a strictly higher epoch), so they can
+  run together and discovery can never move clients backwards.
+* Kubernetes: `-discover` reads `$GAMESERVER_SETS` (e.g. `arcade-gs-a,arcade-gs-b`), `$GAMESERVER_SERVICE`,
+  `$GAMESERVER_HTTP_PORT`, `$POD_NAMESPACE` (the manifest sets them); `-discover-*` flags override.
+  Local runs: `-discover-pods 127.0.0.1:9001 -discover-pods 127.0.0.1:9002`.
+* With `-discover` you do not need `-default-upstream`.
+
 ### Proxy → game pod
 * Dials `ws://<primary_addr>/ws?<client query>` (path: `-upstream-path`).
 * Adds headers `X-Arcade-Match`, `X-Arcade-Epoch` (**use it to refuse a proxy that is behind**) and `X-Forwarded-For`.
@@ -126,7 +145,7 @@ epochs are ignored; after `-max-outage` with no primary the client gets close `1
 
 ```bash
 go vet ./... && go test -race ./...
-scripts/e2e.sh crash && scripts/e2e.sh graceful
+scripts/e2e.sh crash && scripts/e2e.sh graceful && scripts/e2e.sh discover
 python3 scripts/browser_e2e.py          # needs `pip install playwright` + a Chromium
 ```
 
@@ -149,4 +168,4 @@ Choices made on purpose:
 ## Flags
 
 `proxy -h` lists them all. The ones you will touch: `-listen`, `-admin`, `-admin-token`, `-origin`,
-`-default-upstream`, `-route match=epoch@host:port`, `-max-outage`, `-pending-messages`, `-upstream-ping`.
+`-default-upstream`, `-discover`, `-route match=epoch@host:port`, `-max-outage`, `-pending-messages`, `-upstream-ping`.
