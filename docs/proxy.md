@@ -53,7 +53,7 @@ Or just `scripts/e2e.sh crash` / `graceful` / `discover`.
 The whole query string is forwarded to the game pod unchanged (put `player=` etc. there).
 Browsers must come from an allowed origin (`-origin game.example.com`).
 
-### Control plane → proxy (takeover notification) — **proposed, to be agreed with the leader-election owner**
+### Control plane → proxy (takeover notification)
 `POST /admin/route` (internal listener, optional `Authorization: Bearer $ARCADE_ADMIN_TOKEN`):
 
 ```json
@@ -142,6 +142,21 @@ epochs are ignored; after `-max-outage` with no primary the client gets close `1
    waits up to `-write-timeout`.
 
 ## Tests
+
+**Quick check for anyone on the team (a few seconds, no Kubernetes, Redis or Docker needed):**
+
+```bash
+go test ./pkg/proxy -run Acceptance -v
+```
+
+| Test | What it proves |
+|---|---|
+| `TestAcceptance_PlayersSurviveAPrimaryCrash` | 20 players keep playing through a primary crash and an epoch-2 takeover notice: 0 disconnects, every player moves to the new primary |
+| `TestAcceptance_PlayersSurviveATakeoverWhileTheOldPrimaryIsStillAlive` | same, but the old primary stays alive; nothing it says reaches a player once the new one has answered |
+| `TestAcceptance_PlayersSurviveWhenTheNoticeNeverArrives` | no notice is sent; the proxy finds the new primary by asking the pods (`GET /role`) and ignores a fenced pod that still calls itself primary |
+| `TestAcceptance_TakeoverNoticeContract` | what `POST /admin/route` accepts and answers (applied / duplicate / stale / conflict / 401 / 400): the interface the failure detector codes against |
+
+If one of these fails, the proxy is broken, not the game server. The full suite is below.
 
 ```bash
 go vet ./... && go test -race ./...
