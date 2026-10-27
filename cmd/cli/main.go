@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -205,8 +207,20 @@ func printGameOver(winner string, humanPlayer string) {
 }
 
 func main() {
-	reader := bufio.NewReader(os.Stdin)
+	connectURL := flag.String("connect", "", "WebSocket URL to join a remote gameserver or proxy (e.g. ws://localhost:8081/ws)")
+	playerID := flag.String("player", "player1", "player identifier when connecting remotely")
+	flag.Parse()
+
 	printHeader()
+
+	if *connectURL != "" {
+		if err := runRemoteClient(context.Background(), *connectURL, *playerID); err != nil {
+			fmt.Printf("%sRemote session ended: %v%s\n", ansiRed, err, ansiReset)
+		}
+		return
+	}
+
+	reader := bufio.NewReader(os.Stdin)
 
 	humanPlayer := "You"
 	botPlayers := []string{"Bot-Alice", "Bot-Bob", "Bot-Charlie"}
