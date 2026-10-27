@@ -72,6 +72,14 @@ func (g *Game) ExportSnapshot() ([]byte, error) {
 	return g.state.ExportSnapshot()
 }
 
+// ExportBinary serializes the internal state into compact bit-packed binary bytes.
+// Holds an RLock to guarantee snapshot consistency under concurrent operations.
+func (g *Game) ExportBinary() ([]byte, error) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.state.ExportBinary()
+}
+
 // Checksum computes the SHA-256 fingerprint of the current state.
 func (g *Game) Checksum() (string, error) {
 	g.mu.RLock()

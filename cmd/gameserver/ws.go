@@ -20,18 +20,26 @@ import (
 // GameServerWS manages client WebSocket connections for the active match.
 type GameServerWS struct {
 	status  *fleet.Status
-	getGame func() *uno.Game
+	session EngineSession
 	mu      sync.Mutex
 	conns   map[*websocket.Conn]string
 	counter atomic.Int64 // Handles "inc" messages from test clients
 }
 
-func NewGameServerWS(status *fleet.Status, getGame func() *uno.Game) *GameServerWS {
-	return &GameServerWS{
+func NewGameServerWS(status *fleet.Status, session EngineSession) *GameServerWS {
+	ws := &GameServerWS{
 		status:  status,
-		getGame: getGame,
+		session: session,
 		conns:   make(map[*websocket.Conn]string),
 	}
+	if session != nil {
+		// Decoupled Observer Hook: automatically broadcast state transitions on every committed move
+		session.RegisterHook(func(prev, next *uno.State, summary uno.ActionSummary) error {
+			ws.triggerBroadcast()
+			return nil
+		})
+	}
+	return ws
 }
 
 // ServeHTTP handles the client WebSocket upgrade at /ws.
@@ -102,13 +110,11 @@ func (ws *GameServerWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var act uno.Action
 			if err := json.Unmarshal(env.Payload, &act); err == nil {
 				act.PlayerID = playerID
-				game := ws.getGame()
-				if game != nil {
-					if _, err := game.ApplyAction(act); err != nil {
+				if ws.session != nil {
+					if _, err := ws.session.ApplyAction(act); err != nil {
 						ws.sendError(conn, "ILLEGAL_MOVE", err.Error())
-					} else {
-						ws.triggerBroadcast()
 					}
+					// State broadcast is automatically triggered via session's MoveHook
 				}
 			}
 		}
@@ -116,19 +122,18 @@ func (ws *GameServerWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ws *GameServerWS) sendCurrentState(conn *websocket.Conn) {
-	game := ws.getGame()
-	if game == nil {
+	if ws.session == nil {
 		return
 	}
-	snap, err := game.ExportSnapshot()
+	snap, err := ws.session.ExportSnapshot()
 	if err != nil {
 		return
 	}
 
 	env := protocol.Envelope{
 		Type:      protocol.TypeStateBroadcast,
-		MatchID:   game.MatchID(),
-		Sequence:  game.Sequence(),
+		MatchID:   ws.session.MatchID(),
+		Sequence:  ws.session.Sequence(),
 		Timestamp: time.Now().UnixMilli(),
 		Payload:   snap,
 	}

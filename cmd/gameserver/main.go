@@ -119,8 +119,11 @@ func main() {
 	chk, _ := engine.Checksum()
 	log.Printf("[GAMESERVER] State engine online. Initial sequence=%d SHA256=%s", engine.Sequence(), chk)
 
-	// Register move hook for metrics instrumentation and replication
-	engine.RegisterHook(func(prev, next *uno.State, summary uno.ActionSummary) error {
+	// Encapsulate engine in a thread-safe, decoupled GameSession
+	session := NewGameSession(engine)
+
+	// Register persistent move hook for Prometheus metrics instrumentation
+	session.RegisterHook(func(prev, next *uno.State, summary uno.ActionSummary) error {
 		start := time.Now()
 		defer func() {
 			elapsedUs := float64(time.Since(start).Microseconds())
@@ -167,10 +170,9 @@ func main() {
 	go func() {
 		log.Printf("[GAMESERVER] Telemetry & pprof HTTP server listening on :%d", *httpPort)
 		// -------------------------------------------------------------------------
-		// Game WebSocket Handler & Failure Detector Integration (Marcus & Team)
+		// Decoupled WebSocket Handler & Failure Detector Integration (Marcus & Team)
 		// -------------------------------------------------------------------------
-		getEngine := func() *uno.Game { return engine }
-		wsHandler := NewGameServerWS(status, getEngine)
+		wsHandler := NewGameServerWS(status, session)
 		mux.Handle("/ws", wsHandler)
 
 		// Automatically step down and close player sockets with 1012 on demotion
@@ -194,7 +196,7 @@ func main() {
 			OnTakeover: func(epoch int64, newGame *uno.Game) {
 				log.Printf("[TAKEOVER] Standby successfully promoted to Primary at Epoch=%d", epoch)
 				if newGame != nil {
-					engine = newGame
+					session.SwapGame(newGame)
 				}
 				// Hook replication for subsequent primary moves
 				rep := replication.NewReplicator(store, replication.ReplicatorConfig{
@@ -205,7 +207,7 @@ func main() {
 						status.Demote()
 					},
 				})
-				engine.RegisterHook(rep.Hook())
+				session.RegisterHook(rep.Hook())
 			},
 			Logf: log.Printf,
 		})
