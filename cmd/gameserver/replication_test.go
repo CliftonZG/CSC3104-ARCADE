@@ -12,7 +12,7 @@ import (
 
 func TestStartPrimaryFreshThenResume(t *testing.T) {
 	ctx := context.Background()
-	store, err := connectStore(ctx, miniredis.RunT(t).Addr())
+	store, err := connectStore(ctx, redisConfig{Addr: miniredis.RunT(t).Addr()})
 	if err != nil {
 		t.Fatalf("connectStore: %v", err)
 	}

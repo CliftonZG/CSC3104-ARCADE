@@ -109,6 +109,9 @@ type Store struct {
 	rdb          redis.UniversalClient
 	prefix       string
 	streamMaxLen int64
+	acks         int
+	ackTimeout   time.Duration
+	writeTimeout time.Duration
 }
 
 // Option configures a Store.
@@ -122,6 +125,23 @@ func WithKeyPrefix(prefix string) Option {
 // WithStreamMaxLen sets the approximate snapshot stream length; 0 disables the stream.
 func WithStreamMaxLen(n int64) Option {
 	return func(s *Store) { s.streamMaxLen = n }
+}
+
+// WithReplicaAcks makes every epoch claim and snapshot commit wait (Redis WAIT)
+// until at least n replicas have the write, failing with ErrNotReplicated
+// after timeout. Redis replicates asynchronously, so without this a Sentinel
+// failover can promote a replica that missed the latest claim: the epoch would
+// go backwards and a fenced primary could write again. Use with a single-node
+// or Sentinel client; n <= 0 disables the check.
+func WithReplicaAcks(n int, timeout time.Duration) Option {
+	return func(s *Store) { s.acks, s.ackTimeout = n, timeout }
+}
+
+// WithWriteTimeout sets how long a Replicator keeps retrying one move's commit
+// (default DefaultWriteTimeout). With Sentinel, make it longer than a Redis
+// failover (a few seconds) so moves pause during the failover instead of failing.
+func WithWriteTimeout(d time.Duration) Option {
+	return func(s *Store) { s.writeTimeout = d }
 }
 
 // NewStore wraps a go-redis client (single node, sentinel or cluster).
@@ -150,8 +170,8 @@ func (s *Store) streamKey(matchID string) string   { return s.key(matchID, "stre
 // is set to the commit time. Retrying an already-committed write is a no-op.
 func (s *Store) Write(ctx context.Context, snap *Snapshot) error {
 	keys := []string{s.epochKey(snap.MatchID), s.snapshotKey(snap.MatchID), s.streamKey(snap.MatchID)}
-	res, err := commitScript.Run(ctx, s.rdb, keys,
-		snap.Epoch, snap.Sequence, string(snap.Format), snap.Data, s.streamMaxLen).Slice()
+	res, acked, err := s.run(ctx, commitScript, keys,
+		snap.Epoch, snap.Sequence, string(snap.Format), snap.Data, s.streamMaxLen)
 	if err != nil {
 		return fmt.Errorf("replication: commit snapshot: %w", err)
 	}
@@ -161,6 +181,9 @@ func (s *Store) Write(ctx context.Context, snap *Snapshot) error {
 	}
 	switch status {
 	case "OK", "DUP":
+		if err := s.checkAcks(acked, "commit", snap.MatchID); err != nil {
+			return err
+		}
 		snap.WrittenAt = time.UnixMilli(value)
 		return nil
 	case "FENCED":
@@ -177,7 +200,7 @@ func (s *Store) Write(ctx context.Context, snap *Snapshot) error {
 // epoch is fenced. If the epoch is no longer expected (another pod claimed
 // first) it returns a *FencedError carrying the current epoch.
 func (s *Store) ClaimEpoch(ctx context.Context, matchID string, expected int64) (int64, error) {
-	res, err := claimScript.Run(ctx, s.rdb, []string{s.epochKey(matchID)}, expected).Slice()
+	res, acked, err := s.run(ctx, claimScript, []string{s.epochKey(matchID)}, expected)
 	if err != nil {
 		return 0, fmt.Errorf("replication: claim epoch: %w", err)
 	}
@@ -187,6 +210,9 @@ func (s *Store) ClaimEpoch(ctx context.Context, matchID string, expected int64) 
 	}
 	switch status {
 	case "OK":
+		if err := s.checkAcks(acked, "claim", matchID); err != nil {
+			return 0, err
+		}
 		return value, nil
 	case "FENCED":
 		return 0, &FencedError{MatchID: matchID, Held: expected, Current: value}
@@ -332,6 +358,47 @@ func asString(v interface{}) string {
 
 // parseReply decodes a {status, value} Lua reply. Redis returns Lua numbers
 // as integers and Lua strings as strings, so value may be either.
+// run executes a fencing script. With replica acks enabled the script and a
+// WAIT are pipelined on one connection, because WAIT only covers writes made
+// by its own connection; it then also returns how many replicas acknowledged.
+func (s *Store) run(ctx context.Context, script *redis.Script, keys []string, args ...interface{}) ([]interface{}, int64, error) {
+	if s.acks <= 0 {
+		res, err := script.Run(ctx, s.rdb, keys, args...).Slice()
+		return res, 0, err
+	}
+	for attempt := 0; ; attempt++ {
+		pipe := s.rdb.Pipeline()
+		var cmd *redis.Cmd
+		if attempt == 0 {
+			cmd = script.EvalSha(ctx, pipe, keys, args...)
+		} else {
+			cmd = script.Eval(ctx, pipe, keys, args...)
+		}
+		wait := pipe.Do(ctx, "WAIT", s.acks, s.ackTimeout.Milliseconds())
+		_, _ = pipe.Exec(ctx) // errors are inspected per command below
+		if attempt == 0 && redis.HasErrorPrefix(cmd.Err(), "NOSCRIPT") {
+			continue // script cache empty (e.g. a freshly promoted replica): send the source
+		}
+		res, err := cmd.Slice()
+		if err != nil {
+			return nil, 0, err
+		}
+		acked, err := wait.Int64()
+		if err != nil {
+			return nil, 0, fmt.Errorf("WAIT: %w", err)
+		}
+		return res, acked, nil
+	}
+}
+
+func (s *Store) checkAcks(acked int64, op, matchID string) error {
+	if s.acks > 0 && acked < int64(s.acks) {
+		return fmt.Errorf("%w: %s for match %q reached %d of %d replicas within %s",
+			ErrNotReplicated, op, matchID, acked, s.acks, s.ackTimeout)
+	}
+	return nil
+}
+
 func parseReply(res []interface{}) (string, int64, error) {
 	if len(res) != 2 {
 		return "", 0, fmt.Errorf("replication: malformed script reply %v", res)

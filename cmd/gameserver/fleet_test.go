@@ -20,11 +20,11 @@ func TestConnectStoreWithRetryWaitsForRedis(t *testing.T) {
 	}()
 	t.Cleanup(mr.Close)
 
-	store, err := connectStoreWithRetry(context.Background(), addr, 10*time.Second)
+	store, err := connectStoreWithRetry(context.Background(), redisConfig{Addr: addr}, 10*time.Second)
 	if err != nil || store == nil {
 		t.Fatalf("connectStoreWithRetry: %v", err)
 	}
-	if _, err := connectStoreWithRetry(context.Background(), "127.0.0.1:"+freePort(t), 300*time.Millisecond); err == nil {
+	if _, err := connectStoreWithRetry(context.Background(), redisConfig{Addr: "127.0.0.1:" + freePort(t)}, 300*time.Millisecond); err == nil {
 		t.Fatal("expected error when Redis never comes up")
 	}
 }

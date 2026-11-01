@@ -3,6 +3,7 @@ package replication
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,7 +22,8 @@ type ReplicatorConfig struct {
 	Epoch int64
 	// Format defaults to FormatJSON.
 	Format Format
-	// WriteTimeout defaults to DefaultWriteTimeout.
+	// WriteTimeout bounds each commit including retries; it defaults to the
+	// Store's WithWriteTimeout, else DefaultWriteTimeout.
 	WriteTimeout time.Duration
 	// OnFenced is called once, the first time Redis rejects this pod's epoch.
 	// The pod must stop serving the match: the engine has already applied the
@@ -44,6 +46,9 @@ func NewReplicator(store *Store, cfg ReplicatorConfig) *Replicator {
 		cfg.Format = FormatJSON
 	}
 	if cfg.WriteTimeout <= 0 {
+		cfg.WriteTimeout = store.writeTimeout
+	}
+	if cfg.WriteTimeout <= 0 {
 		cfg.WriteTimeout = DefaultWriteTimeout
 	}
 	return &Replicator{store: store, cfg: cfg}
@@ -60,35 +65,53 @@ func (r *Replicator) Fenced() bool { return r.fenced.Load() != nil }
 // Game.ApplyAction wrapped in uno.ErrHookFailed.
 func (r *Replicator) Hook() uno.MoveHook {
 	return func(_, next *uno.State, _ uno.ActionSummary) error {
-		ctx, cancel := context.WithTimeout(context.Background(), r.cfg.WriteTimeout)
-		defer cancel()
-		return r.Publish(ctx, next)
+		return r.Publish(context.Background(), next)
 	}
 }
 
 // Publish commits st to Redis under this pod's epoch. Call it once after
 // becoming primary to persist the starting state; the hook covers every move
-// after that. Once fenced, Publish fails fast without contacting Redis.
+// after that. It gives up after WriteTimeout. Once fenced, Publish fails fast
+// without contacting Redis.
 func (r *Replicator) Publish(ctx context.Context, st *uno.State) error {
 	if fe := r.fenced.Load(); fe != nil {
 		return fe
 	}
+	ctx, cancel := context.WithTimeout(ctx, r.cfg.WriteTimeout)
+	defer cancel()
 
 	start := time.Now()
 	data, err := r.cfg.Format.Encode(st)
 	if err != nil {
 		return err
 	}
-	err = r.store.Write(ctx, &Snapshot{
+	snap := &Snapshot{
 		MatchID:  r.cfg.MatchID,
 		Epoch:    r.cfg.Epoch,
 		Sequence: st.Sequence,
 		Format:   r.cfg.Format,
 		Data:     data,
-	})
-
+	}
+	// Transient failures (Redis failing over, a replica not yet caught up) are
+	// retried until ctx expires; a repeated write is idempotent (DUP). Fencing
+	// and stale sequences are final.
 	var fe *FencedError
-	if errors.As(err, &fe) {
+	for backoff := 25 * time.Millisecond; ; {
+		err = r.store.Write(ctx, snap)
+		if err == nil || errors.As(err, &fe) || errors.Is(err, ErrStaleSequence) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w (gave up after %s)", err, time.Since(start).Round(time.Millisecond))
+		case <-time.After(backoff):
+		}
+		if backoff < 400*time.Millisecond {
+			backoff *= 2
+		}
+	}
+
+	if fe != nil {
 		r.fenced.Store(fe)
 		r.fenceOnce.Do(func() {
 			if r.cfg.OnFenced != nil {

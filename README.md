@@ -110,6 +110,9 @@ make test-redis REDIS_TEST_ADDR=localhost:6379
 # Start gameserver as a replicating primary (Redis at localhost:6379)
 make run-server-redis
 
+# Highly available Redis (1 primary, 2 replicas, 3 Sentinels) for local testing; see pkg/replication/README.md
+scripts/redis-ha-local.sh up
+
 # Containers & Kubernetes (details: k8s/README.md)
 make docker-build          # arcade/{gameserver,proxy,loadprobe}:dev
 make k8s-demo              # 3 self-playing Primary/Standby pairs in namespace "arcade"
