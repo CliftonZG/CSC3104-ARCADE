@@ -148,12 +148,17 @@ func Step(g *uno.Game, p Policy) (uno.Action, error) {
 }
 
 // Driver plays a match on a fixed tick until ctx ends, the match finishes,
-// or a hook fails.
+// or move hooks keep failing.
 type Driver struct {
 	Game     *uno.Game
 	Interval time.Duration // time between moves (per match)
 	Policy   Policy
-	Logf     func(string, ...any)
+	// MaxHookFailures is how many failed moves in a row the driver tolerates
+	// before it stops. A move hook fails, for example, while Redis fails over;
+	// the next successful commit carries the full state, so play can simply
+	// continue. 0 stops at the first failure.
+	MaxHookFailures int
+	Logf            func(string, ...any)
 }
 
 // Run blocks until the driver stops and returns why.
@@ -175,12 +180,16 @@ func (d *Driver) Run(ctx context.Context) error {
 
 	ticker := time.NewTicker(d.Interval)
 	defer ticker.Stop()
-	moves := 0
+	moves, failures := 0, 0
 	for {
 		_, err := Step(d.Game, d.Policy)
 		switch {
 		case err == nil:
 			moves++
+			if failures > 0 {
+				logf("[LOADGEN] match %s resumed after %d failed move(s)", d.Game.MatchID(), failures)
+				failures = 0
+			}
 		case errors.Is(err, uno.ErrGameOver):
 			logf("[LOADGEN] match %s finished after %d moves (winner %s)", d.Game.MatchID(), moves, d.Game.Winner())
 			return nil
@@ -188,8 +197,12 @@ func (d *Driver) Run(ctx context.Context) error {
 			logf("[LOADGEN] %v; stopping", err)
 			return err
 		default:
-			logf("[LOADGEN] move hook failed after %d moves, stopping driver: %v", moves, err)
-			return err
+			failures++
+			if failures > d.MaxHookFailures {
+				logf("[LOADGEN] move hook failed after %d moves, stopping driver: %v", moves, err)
+				return err
+			}
+			logf("[LOADGEN] move hook failed (%d in a row, tolerating %d): %v", failures, d.MaxHookFailures, err)
 		}
 		select {
 		case <-ctx.Done():

@@ -1,0 +1,10 @@
+# Demo with highly available Redis: the 3 self-playing pairs of overlays/demo
+# on a 3-pod Redis + Sentinel group (components/redis-ha).
+#   kubectl apply -k k8s/overlays/ha
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: arcade
+resources:
+  - ../demo
+components:
+  - ../../components/redis-ha

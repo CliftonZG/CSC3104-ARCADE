@@ -178,7 +178,7 @@ func main() {
 
 	// Synthetic self-play for load tests (Phase 2). Only the primary drives moves.
 	if *autoplay > 0 && status.IsPrimary() {
-		driver := &loadgen.Driver{Game: engine, Interval: *autoplay, Policy: loadgen.Policy{Endless: true}, Logf: log.Printf}
+		driver := &loadgen.Driver{Game: engine, Interval: *autoplay, Policy: loadgen.Policy{Endless: true}, MaxHookFailures: 100, Logf: log.Printf}
 		go func() { _ = driver.Run(ctx) }()
 		log.Printf("[LOADGEN] Self-play enabled: one move every %s on match=%s", *autoplay, *matchID)
 	}

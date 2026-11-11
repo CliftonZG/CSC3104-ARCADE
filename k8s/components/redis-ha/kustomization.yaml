@@ -1,0 +1,41 @@
+# Highly available Redis: 1 primary + 2 replicas + 3 Sentinels (master "arcade").
+# Replaces the single Redis pod of k8s/base, so Redis is no longer a single
+# point of failure. Needs a gameserver image built from feat/redis-ha (it reads
+# REDIS_SENTINELS). Enable it from an overlay:
+#   components:
+#     - ../../components/redis-ha
+# or use the ready-made overlay:  kubectl apply -k k8s/overlays/ha
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - redis-ha.yaml
+
+patches:
+  - path: statefulset-patch.yaml
+  # A move's Redis commit is retried for up to 10 s (default with Sentinel: 3 s).
+  # A Redis failover takes about 3 s on Docker Desktop, so with 3 s some moves
+  # failed; with 10 s play just pauses until the new primary is ready.
+  - target:
+      kind: StatefulSet
+      name: arcade-gs-(a|b)
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args
+        value: ["-redis-write-timeout=10s"]
+
+configMapGenerator:
+  # Startup script for the init container. Kustomize adds a content hash to
+  # the name, so editing the script rolls the Redis pods.
+  - name: arcade-redis-ha-scripts
+    files:
+      - scripts/init.sh
+  # Gameservers find the current Redis primary through the Sentinels and wait
+  # for 1 replica to confirm every epoch claim and snapshot (Redis WAIT).
+  # REDIS_SENTINELS overrides REDIS_ADDR in cmd/gameserver.
+  - name: arcade-gameserver-config
+    behavior: merge
+    literals:
+      - REDIS_SENTINELS=arcade-redis-0.arcade-redis-headless:26379,arcade-redis-1.arcade-redis-headless:26379,arcade-redis-2.arcade-redis-headless:26379
+      - REDIS_MASTER_NAME=arcade
+      - REDIS_MIN_REPLICA_ACKS=1

@@ -114,3 +114,24 @@ func BenchmarkStep(b *testing.B) {
 		}
 	}
 }
+
+func TestDriverToleratesTransientHookFailures(t *testing.T) {
+	g, _ := uno.NewGameEngine("m3", players(4), 3)
+	calls := 0
+	g.RegisterHook(func(_, _ *uno.State, _ uno.ActionSummary) error {
+		calls++
+		if calls >= 3 && calls <= 5 { // e.g. Redis failing over for three moves
+			return errors.New("redis unavailable")
+		}
+		return nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	d := &Driver{Game: g, Interval: time.Millisecond, Policy: Policy{Endless: true}, MaxHookFailures: 3, Logf: t.Logf}
+	if err := d.Run(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("driver stopped early: %v (calls=%d)", err, calls)
+	}
+	if calls <= 6 {
+		t.Fatalf("driver did not keep playing after the failures: calls=%d", calls)
+	}
+}

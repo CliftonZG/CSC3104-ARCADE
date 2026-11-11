@@ -1,0 +1,4 @@
+"Run","Killed","NewPrimary","FailoverMs","ResumeMs","SeqBefore","SeqAfter","EpochBefore","EpochAfter","EpochOk","OldPodRejoined"
+"1","arcade-redis-0","arcade-redis-2","3586","3794","272","275","2","2","True","True"
+"2","arcade-redis-2","arcade-redis-0","3499","3660","291","294","2","2","True","True"
+"3","arcade-redis-0","arcade-redis-2","3284","-1","311","311","2","2","True","True"

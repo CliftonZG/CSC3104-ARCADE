@@ -1,4 +1,6 @@
-# Redis accepts connections only from gameservers and the load probe.
+# Redis accepts connections only from gameservers, the load probe and, with
+# components/redis-ha, the other Redis pods (replication and Sentinel gossip).
+# Port 26379 (Sentinel) is unused when Redis runs as a single pod.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -16,8 +18,13 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: arcade-loadprobe
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: arcade-redis
       ports:
         - port: 6379
+          protocol: TCP
+        - port: 26379
           protocol: TCP
 ---
 # Gameservers: heartbeats and /role between partners, HTTP from the proxy and
