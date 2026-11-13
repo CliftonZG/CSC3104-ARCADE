@@ -6,6 +6,7 @@
   <title>ARCADE — Distributed Card Arena</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/lobby.css">
+  <link rel="stylesheet" href="/cluster.css">
 </head>
 <body>
   <!-- Distributed Telemetry & Match HUD -->
@@ -51,6 +52,9 @@
       </button>
       <button type="button" id="btn-open-lobby" class="btn-secondary">
         Switch Seat
+      </button>
+      <button type="button" id="btn-cluster" class="btn-secondary" title="View live servers, routes, and failover activity">
+        Cluster
       </button>
     </div>
   </header>
@@ -176,11 +180,102 @@
     </div>
   </dialog>
 
+  <!-- Cluster & Process Monitor Modal -->
+  <dialog id="cluster-dialog" class="cluster-dialog" aria-labelledby="cluster-title">
+    <div class="cluster-header">
+      <div>
+        <h2 id="cluster-title">Cluster &amp; Processes</h2>
+        <p class="dialog-desc">Live view of game servers, match routes, and failover switches.</p>
+      </div>
+      <div class="cluster-header-actions">
+        <button type="button" id="btn-cluster-refresh" class="btn-secondary btn-small">Refresh</button>
+        <form method="dialog">
+          <button value="close" class="btn-ghost btn-small">Close</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="cluster-auth-box" class="cluster-auth-box" hidden>
+      <p id="cluster-auth-msg" class="cluster-auth-msg">Enter your operator token to view cluster processes.</p>
+      <form id="cluster-auth-form" class="cluster-auth-form">
+        <input type="password" id="cluster-token-input" placeholder="Operator bearer token" autocomplete="off" required>
+        <button type="submit" class="btn-primary btn-small">Unlock</button>
+      </form>
+    </div>
+
+    <div id="cluster-content">
+      <div class="cluster-metrics">
+        <div class="metric-tile">
+          <span class="metric-label">Active Players</span>
+          <strong id="cm-sessions" class="metric-value">—</strong>
+        </div>
+        <div class="metric-tile">
+          <span class="metric-label">Healthy Servers</span>
+          <strong id="cm-pods" class="metric-value">—</strong>
+        </div>
+        <div class="metric-tile">
+          <span class="metric-label">Route Switches</span>
+          <strong id="cm-retargets" class="metric-value">—</strong>
+        </div>
+        <div class="metric-tile">
+          <span class="metric-label">Buffered Moves</span>
+          <strong id="cm-buffered" class="metric-value">—</strong>
+        </div>
+      </div>
+
+      <section class="cluster-section" aria-label="Game servers">
+        <h3 class="cluster-section-title">Game Servers</h3>
+        <div class="cluster-table-wrap">
+          <table class="cluster-table">
+            <thead>
+              <tr>
+                <th>Pod</th>
+                <th>Address</th>
+                <th>Role</th>
+                <th>Epoch</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="cluster-pods-body">
+              <tr><td colspan="5" class="cluster-empty">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="cluster-section" aria-label="Match routes">
+        <h3 class="cluster-section-title">Match Routes</h3>
+        <div class="cluster-table-wrap">
+          <table class="cluster-table">
+            <thead>
+              <tr>
+                <th>Match</th>
+                <th>Primary Server</th>
+                <th>Epoch</th>
+              </tr>
+            </thead>
+            <tbody id="cluster-routes-body">
+              <tr><td colspan="3" class="cluster-empty">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="cluster-section" aria-label="Recent activity">
+        <h3 class="cluster-section-title">Recent Activity</h3>
+        <ul id="cluster-events" class="cluster-events">
+          <li class="cluster-empty">Watching for route or server changes.</li>
+        </ul>
+      </section>
+    </div>
+  </dialog>
+
   <!-- Accessible Toast Notifications Region & Screen Reader Fallback -->
   <div id="toast-region" role="region" aria-label="Game Notifications" class="toast-stack"></div>
   <div id="sr-announcements" class="visually-hidden" aria-live="assertive"></div>
 
   <script src="/app.js"></script>
   <script src="/lobby.js"></script>
+  <script src="/cluster.js"></script>
 </body>
 </html>

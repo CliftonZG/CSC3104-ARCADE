@@ -199,6 +199,7 @@ func main() {
 		mux.Handle("/ws", wsHandler)
 		mux.HandleFunc("/api/rooms", wsHandler.HandleRooms)
 		mux.HandleFunc("/api/matchmake", wsHandler.HandleMatchmake)
+		mux.HandleFunc("/api/cluster", wsHandler.HandleCluster)
 
 		// Automatically step down and close player sockets with 1012 on demotion
 		status.OnChange(func(info fleet.RoleInfo) {

@@ -239,6 +239,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 	mux.Handle("/ws", p)
 	mux.HandleFunc("/api/rooms", p.HandleRooms)
 	mux.HandleFunc("/api/matchmake", p.HandleMatchmake)
+	mux.HandleFunc("/api/cluster", p.HandleCluster)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	clientSrv := &http.Server{Addr: o.listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
