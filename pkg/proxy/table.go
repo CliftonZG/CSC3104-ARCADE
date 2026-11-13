@@ -174,6 +174,13 @@ func (t *Table) Snapshot() map[string]Route {
 	return out
 }
 
+// Default returns the fallback primary address, or "" if none is set.
+func (t *Table) Default() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.def
+}
+
 // Watcher is notified when the route for one match changes.
 type Watcher struct {
 	t     *Table

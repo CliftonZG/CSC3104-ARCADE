@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ARCADE — Distributed Card Arena</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/lobby.css">
 </head>
 <body>
   <!-- Distributed Telemetry & Match HUD -->
@@ -103,9 +104,27 @@
   </main>
 
   <!-- Join / Switch Seat Modal -->
-  <dialog id="lobby-dialog" aria-labelledby="lobby-title">
-    <h2 id="lobby-title">Join ARCADE Match</h2>
-    <p class="dialog-desc">Connect via the ARCADE proxy or gameserver WebSocket endpoint.</p>
+  <dialog id="lobby-dialog" class="lobby-dialog" aria-labelledby="lobby-title">
+    <h2 id="lobby-title">ARCADE Match Lobby</h2>
+    <p class="dialog-desc">Quick-match into an open seat, join a live room, or spin up a new match via the ARCADE proxy.</p>
+
+    <div class="lobby-actions-bar">
+      <button type="button" id="btn-quick-match" class="btn-primary">Quick Match</button>
+      <button type="button" id="btn-create-room" class="btn-secondary">Create New Room</button>
+    </div>
+
+    <section class="lobby-section" aria-label="Active rooms">
+      <div class="rooms-header">
+        <span class="rooms-title">Active Rooms</span>
+        <button type="button" id="btn-refresh-rooms" class="btn-ghost btn-small">Refresh</button>
+      </div>
+      <div id="rooms-list" class="rooms-list" role="list">
+        <p class="rooms-empty">Loading active rooms...</p>
+      </div>
+    </section>
+
+    <hr class="lobby-divider">
+
     <form id="lobby-form" method="dialog" class="lobby-form">
       <label class="field">
         <span>Match ID</span>
@@ -161,5 +180,6 @@
   <div id="sr-announcements" class="visually-hidden" aria-live="assertive"></div>
 
   <script src="/app.js"></script>
+  <script src="/lobby.js"></script>
 </body>
 </html>

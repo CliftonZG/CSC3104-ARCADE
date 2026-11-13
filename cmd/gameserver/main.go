@@ -197,6 +197,8 @@ func main() {
 		// -------------------------------------------------------------------------
 		wsHandler := NewGameServerWS(status, session)
 		mux.Handle("/ws", wsHandler)
+		mux.HandleFunc("/api/rooms", wsHandler.HandleRooms)
+		mux.HandleFunc("/api/matchmake", wsHandler.HandleMatchmake)
 
 		// Automatically step down and close player sockets with 1012 on demotion
 		status.OnChange(func(info fleet.RoleInfo) {
