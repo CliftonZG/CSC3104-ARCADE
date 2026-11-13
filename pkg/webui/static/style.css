@@ -346,13 +346,13 @@ button:disabled {
   background: rgba(255, 255, 255, 0.1);
 }
 
-/* Uno Cards */
+/* ARCADE Cards */
 .card {
   position: relative;
   inline-size: 96px;
   block-size: 142px;
   border-radius: 0.75rem;
-  border: 4px solid #ffffff;
+  border: 3px solid rgba(255, 255, 255, 0.9);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
   display: grid;
   place-items: center;
@@ -361,52 +361,53 @@ button:disabled {
   transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
 }
 
-.card-red { background: linear-gradient(145deg, #ef4444, #b91c1c); color: #fff; }
-.card-yellow { background: linear-gradient(145deg, #facc15, #ca8a04); color: #111827; }
-.card-green { background: linear-gradient(145deg, #22c55e, #15803d); color: #fff; }
-.card-blue { background: linear-gradient(145deg, #3b82f6, #1d4ed8); color: #fff; }
+.card-red { background: linear-gradient(155deg, #ef4444, #991b1b); color: #fff; }
+.card-yellow { background: linear-gradient(155deg, #facc15, #b45309); color: #111827; }
+.card-green { background: linear-gradient(155deg, #22c55e, #166534); color: #fff; }
+.card-blue { background: linear-gradient(155deg, #3b82f6, #1e40af); color: #fff; }
 .card-wild {
-  background: conic-gradient(
-    from 45deg,
-    var(--uno-red) 0deg 90deg,
-    var(--uno-blue) 90deg 180deg,
-    var(--uno-yellow) 180deg 270deg,
-    var(--uno-green) 270deg 360deg
-  );
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-color: var(--accent);
   color: #fff;
 }
 
 .card-back {
-  background: linear-gradient(145deg, #1f2937, #0f172a);
-  color: #ef4444;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(52, 211, 153, 0.06) 0px,
+      rgba(52, 211, 153, 0.06) 6px,
+      transparent 6px,
+      transparent 12px
+    ),
+    linear-gradient(155deg, #111827, #062818);
+  border-color: rgba(52, 211, 153, 0.65);
+  color: var(--accent);
 }
 
-.card-oval {
+.card-frame {
   inline-size: 76%;
-  block-size: 62%;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.18);
-  border: 2px solid rgba(255, 255, 255, 0.55);
-  transform: rotate(-18deg);
+  block-size: 74%;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
   display: grid;
   place-items: center;
 }
 
-.card-back .card-oval {
-  background: #dc2626;
-  border-color: #facc15;
+.card-back .card-frame {
+  background: rgba(6, 40, 24, 0.72);
+  border-color: rgba(52, 211, 153, 0.45);
 }
 
-.uno-word {
-  font-weight: 900;
-  font-style: italic;
-  font-size: 1.35rem;
-  color: #facc15;
-  text-shadow: 2px 2px 0 #111827;
+.arcade-mark {
+  font-weight: 800;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  color: var(--accent);
 }
 
 .card-center {
-  transform: rotate(18deg);
   font-weight: 900;
   font-size: 1.85rem;
   line-height: 1;

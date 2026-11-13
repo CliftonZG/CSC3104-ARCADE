@@ -225,18 +225,18 @@
     tl.className = 'card-corner tl';
     tl.textContent = label;
 
-    const oval = document.createElement('div');
-    oval.className = 'card-oval';
+    const frame = document.createElement('div');
+    frame.className = 'card-frame';
     const center = document.createElement('span');
     center.className = 'card-center';
     center.textContent = label;
-    oval.appendChild(center);
+    frame.appendChild(center);
 
     const br = document.createElement('span');
     br.className = 'card-corner br';
     br.textContent = label;
 
-    cardDiv.append(tl, oval, br);
+    cardDiv.append(tl, frame, br);
     return cardDiv;
   }
 
@@ -266,7 +266,7 @@
       if (count === 1) {
         const uno = document.createElement('span');
         uno.className = 'uno-shout';
-        uno.textContent = 'UNO!';
+        uno.textContent = '1 LEFT!';
         nameEl.appendChild(uno);
       }
 
