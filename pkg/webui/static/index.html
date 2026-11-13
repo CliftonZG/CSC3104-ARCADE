@@ -45,6 +45,9 @@
       <button type="button" id="btn-step-bot" class="btn-secondary" title="Trigger one AI move for the current active player">
         Step Bot
       </button>
+      <button type="button" id="btn-new-game" class="btn-secondary" title="Deal a fresh match in this room">
+        New Game
+      </button>
       <button type="button" id="btn-open-lobby" class="btn-secondary">
         Switch Seat
       </button>
@@ -147,8 +150,9 @@
     <p id="gameover-message" class="dialog-desc"></p>
     <div class="dialog-actions">
       <form method="dialog">
-        <button value="close" class="btn-primary" autofocus>Close</button>
+        <button value="close" class="btn-secondary">Close</button>
       </form>
+      <button type="button" id="btn-play-again" class="btn-primary" autofocus>Play Again</button>
     </div>
   </dialog>
 

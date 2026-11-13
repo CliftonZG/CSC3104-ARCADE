@@ -35,7 +35,9 @@
   const elHudRtt = document.getElementById('hud-rtt');
   const elAutoBots = document.getElementById('auto-bots-toggle');
   const elBtnStepBot = document.getElementById('btn-step-bot');
+  const elBtnNewGame = document.getElementById('btn-new-game');
   const elBtnOpenLobby = document.getElementById('btn-open-lobby');
+  const elBtnPlayAgain = document.getElementById('btn-play-again');
   const elOpponents = document.getElementById('opponents-container');
   const elBtnDraw = document.getElementById('btn-draw');
   const elDeckCount = document.getElementById('deck-count');
@@ -366,9 +368,20 @@
     sendAction({ type: 'pass', player_id: state.playerId });
   });
 
+  function requestNewGame() {
+    state.gameOverShownForSeq = -1;
+    if (gameoverDialog.open) {
+      gameoverDialog.close();
+    }
+    sendEnvelope('new_game', {});
+  }
+
   elBtnStepBot.addEventListener('click', () => {
     stepBot();
   });
+
+  elBtnNewGame.addEventListener('click', requestNewGame);
+  elBtnPlayAgain.addEventListener('click', requestNewGame);
 
   elAutoBots.addEventListener('change', (e) => {
     state.autoBots = e.target.checked;

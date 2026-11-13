@@ -17,29 +17,88 @@ import (
 	"github.com/coder/websocket"
 )
 
-// GameServerWS manages client WebSocket connections for the active match.
+type wsClient struct {
+	playerID string
+	matchID  string
+}
+
+// GameServerWS manages client WebSocket connections and per-match sessions.
+// In Kubernetes, a pod pair serves its configured default match; in standalone
+// or local multi-room mode, additional match IDs requested via ?match=... are
+// lazily created and isolated by room.
 type GameServerWS struct {
-	status  *fleet.Status
-	session EngineSession
-	mu      sync.Mutex
-	conns   map[*websocket.Conn]string
-	counter atomic.Int64 // Handles "inc" messages from test clients
+	status         *fleet.Status
+	defaultSession EngineSession
+	sessionsMu     sync.RWMutex
+	sessions       map[string]EngineSession
+	mu             sync.Mutex
+	conns          map[*websocket.Conn]wsClient
+	counter        atomic.Int64 // Handles "inc" messages from test clients
 }
 
 func NewGameServerWS(status *fleet.Status, session EngineSession) *GameServerWS {
 	ws := &GameServerWS{
-		status:  status,
-		session: session,
-		conns:   make(map[*websocket.Conn]string),
+		status:         status,
+		defaultSession: session,
+		sessions:       make(map[string]EngineSession),
+		conns:          make(map[*websocket.Conn]wsClient),
 	}
 	if session != nil {
+		mid := session.MatchID()
+		ws.sessions[mid] = session
 		// Decoupled Observer Hook: automatically broadcast state transitions on every committed move
 		session.RegisterHook(func(prev, next *uno.State, summary uno.ActionSummary) error {
-			ws.triggerBroadcast()
+			ws.triggerBroadcast(mid)
 			return nil
 		})
 	}
 	return ws
+}
+
+func (ws *GameServerWS) getOrCreateSession(matchID string) EngineSession {
+	if matchID == "" && ws.defaultSession != nil {
+		matchID = ws.defaultSession.MatchID()
+	}
+
+	ws.sessionsMu.RLock()
+	sess, ok := ws.sessions[matchID]
+	ws.sessionsMu.RUnlock()
+	if ok {
+		return sess
+	}
+
+	ws.sessionsMu.Lock()
+	defer ws.sessionsMu.Unlock()
+	if sess, ok := ws.sessions[matchID]; ok {
+		return sess
+	}
+
+	g, err := uno.NewGameEngine(matchID, []string{"player1", "player2", "player3", "player4"}, time.Now().UnixNano())
+	if err != nil {
+		return ws.defaultSession
+	}
+	sess = NewGameSession(g)
+	sess.RegisterHook(func(prev, next *uno.State, summary uno.ActionSummary) error {
+		ws.triggerBroadcast(matchID)
+		return nil
+	})
+	ws.sessions[matchID] = sess
+	log.Printf("[WS] Created new concurrent room session: match=%s", matchID)
+	return sess
+}
+
+func (ws *GameServerWS) resetSession(matchID string) {
+	sess := ws.getOrCreateSession(matchID)
+	if sess == nil {
+		return
+	}
+	fresh, err := uno.NewGameEngine(sess.MatchID(), []string{"player1", "player2", "player3", "player4"}, time.Now().UnixNano())
+	if err != nil {
+		return
+	}
+	sess.SwapGame(fresh)
+	log.Printf("[WS] Started new game for match=%s", sess.MatchID())
+	ws.triggerBroadcast(sess.MatchID())
 }
 
 // ServeHTTP handles the client WebSocket upgrade at /ws.
@@ -53,6 +112,14 @@ func (ws *GameServerWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if playerID == "" {
 		playerID = "guest-" + r.RemoteAddr
 	}
+	matchID := r.URL.Query().Get("match")
+	if matchID == "" && ws.defaultSession != nil {
+		matchID = ws.defaultSession.MatchID()
+	}
+	sess := ws.getOrCreateSession(matchID)
+	if sess != nil {
+		matchID = sess.MatchID()
+	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionDisabled,
@@ -64,7 +131,7 @@ func (ws *GameServerWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = conn.CloseNow() }()
 
 	ws.mu.Lock()
-	ws.conns[conn] = playerID
+	ws.conns[conn] = wsClient{playerID: playerID, matchID: matchID}
 	ws.mu.Unlock()
 
 	defer func() {
@@ -74,7 +141,7 @@ func (ws *GameServerWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Send initial state snapshot on connect
-	ws.sendCurrentState(conn)
+	ws.sendCurrentState(conn, matchID)
 
 	// Message ingest loop
 	for {
@@ -111,26 +178,30 @@ func (ws *GameServerWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var act uno.Action
 			if err := json.Unmarshal(env.Payload, &act); err == nil {
 				act.PlayerID = playerID
-				if ws.session != nil {
-					if _, err := ws.session.ApplyAction(act); err != nil {
+				sess := ws.getOrCreateSession(matchID)
+				if sess != nil {
+					if _, err := sess.ApplyAction(act); err != nil {
 						ws.sendError(conn, "ILLEGAL_MOVE", err.Error())
 					}
 					// State broadcast is automatically triggered via session's MoveHook
 				}
 			}
 		case protocol.TypeBotStep:
-			ws.stepBot(playerID)
+			ws.stepBot(matchID, playerID)
+		case protocol.TypeNewGame:
+			ws.resetSession(matchID)
 		}
 	}
 }
 
-// stepBot executes one legal move for the current player, provided the current
-// player is not the requesting human seat.
-func (ws *GameServerWS) stepBot(requestingPlayer string) {
-	if ws.session == nil {
+// stepBot executes one legal move for the current player in matchID,
+// provided the current player is not the requesting human seat.
+func (ws *GameServerWS) stepBot(matchID, requestingPlayer string) {
+	sess := ws.getOrCreateSession(matchID)
+	if sess == nil {
 		return
 	}
-	st := ws.session.State()
+	st := sess.State()
 	if st == nil || st.Status == uno.StatusFinished {
 		return
 	}
@@ -144,7 +215,7 @@ func (ws *GameServerWS) stepBot(requestingPlayer string) {
 			if c.IsWild() {
 				col = uno.ColourRed
 			}
-			_, _ = ws.session.ApplyAction(uno.Action{
+			_, _ = sess.ApplyAction(uno.Action{
 				Type:           uno.ActionPlay,
 				PlayerID:       cur,
 				CardIndex:      idx,
@@ -153,24 +224,25 @@ func (ws *GameServerWS) stepBot(requestingPlayer string) {
 			return
 		}
 	}
-	if _, err := ws.session.ApplyAction(uno.Action{Type: uno.ActionDraw, PlayerID: cur}); err != nil {
-		_, _ = ws.session.ApplyAction(uno.Action{Type: uno.ActionPass, PlayerID: cur})
+	if _, err := sess.ApplyAction(uno.Action{Type: uno.ActionDraw, PlayerID: cur}); err != nil {
+		_, _ = sess.ApplyAction(uno.Action{Type: uno.ActionPass, PlayerID: cur})
 	}
 }
 
-func (ws *GameServerWS) sendCurrentState(conn *websocket.Conn) {
-	if ws.session == nil {
+func (ws *GameServerWS) sendCurrentState(conn *websocket.Conn, matchID string) {
+	sess := ws.getOrCreateSession(matchID)
+	if sess == nil {
 		return
 	}
-	snap, err := ws.session.ExportSnapshot()
+	snap, err := sess.ExportSnapshot()
 	if err != nil {
 		return
 	}
 
 	env := protocol.Envelope{
 		Type:      protocol.TypeStateBroadcast,
-		MatchID:   ws.session.MatchID(),
-		Sequence:  ws.session.Sequence(),
+		MatchID:   sess.MatchID(),
+		Sequence:  sess.Sequence(),
 		Timestamp: time.Now().UnixMilli(),
 		Payload:   snap,
 	}
@@ -180,11 +252,13 @@ func (ws *GameServerWS) sendCurrentState(conn *websocket.Conn) {
 	_ = conn.Write(ctx, websocket.MessageText, bytes)
 }
 
-func (ws *GameServerWS) triggerBroadcast() {
+func (ws *GameServerWS) triggerBroadcast(matchID string) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
-	for c := range ws.conns {
-		go ws.sendCurrentState(c)
+	for c, client := range ws.conns {
+		if client.matchID == matchID {
+			go ws.sendCurrentState(c, matchID)
+		}
 	}
 }
 

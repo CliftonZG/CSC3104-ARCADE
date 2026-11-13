@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/CSC3104-ARCADE/pkg/fleet"
 	"github.com/CSC3104-ARCADE/pkg/uno"
 )
 
@@ -87,4 +88,35 @@ func TestGameSessionConcurrency(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestGameServerWSMultiRoomAndReset(t *testing.T) {
+	game, err := uno.NewGameEngine("room0", []string{"player1", "player2", "player3", "player4"}, 42)
+	if err != nil {
+		t.Fatalf("failed to create game: %v", err)
+	}
+	status := fleet.NewStatus(fleet.Identity{MatchID: "room0"}, fleet.RolePrimary)
+	ws := NewGameServerWS(status, NewGameSession(game))
+
+	s0 := ws.getOrCreateSession("room0")
+	s1 := ws.getOrCreateSession("room1")
+	s2 := ws.getOrCreateSession("room2")
+
+	if s0.MatchID() != "room0" || s1.MatchID() != "room1" || s2.MatchID() != "room2" {
+		t.Fatalf("unexpected match IDs: %s, %s, %s", s0.MatchID(), s1.MatchID(), s2.MatchID())
+	}
+
+	// Advance room1 independently from room0
+	if _, err := s1.ApplyAction(uno.Action{Type: uno.ActionDraw, PlayerID: s1.State().CurrentPlayer()}); err != nil {
+		t.Fatalf("draw in room1: %v", err)
+	}
+	if s1.Sequence() != 1 || s0.Sequence() != 0 || s2.Sequence() != 0 {
+		t.Fatalf("rooms were not isolated: seqs=(%d, %d, %d)", s0.Sequence(), s1.Sequence(), s2.Sequence())
+	}
+
+	// Reset room1 and verify sequence returns to 0
+	ws.resetSession("room1")
+	if ws.getOrCreateSession("room1").Sequence() != 0 {
+		t.Fatalf("expected room1 sequence 0 after reset, got %d", ws.getOrCreateSession("room1").Sequence())
+	}
 }

@@ -13,6 +13,7 @@ const (
 	TypeHeartbeat       MessageType = "heartbeat"
 	TypeErrorResponse   MessageType = "error_response"
 	TypeBotStep         MessageType = "bot_step"
+	TypeNewGame         MessageType = "new_game"
 )
 
 // Envelope is the standard wire envelope for all IPC, RPC, and WebSocket communications.
