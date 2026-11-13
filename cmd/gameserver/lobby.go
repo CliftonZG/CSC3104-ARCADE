@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	mathrand "math/rand/v2"
 	"net/http"
 	"sort"
 	"strings"
@@ -25,6 +26,10 @@ type RoomInfo struct {
 
 type createRoomRequest struct {
 	MatchID string `json:"match_id"`
+}
+
+type matchmakeRequest struct {
+	Mode string `json:"mode"`
 }
 
 type matchmakeResponse struct {
@@ -82,7 +87,32 @@ func (ws *GameServerWS) HandleMatchmake(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	var req matchmakeRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req)
+	}
+	randomMode := strings.EqualFold(req.Mode, "random") || strings.EqualFold(r.URL.Query().Get("mode"), "random")
+
 	rooms := ws.listRooms()
+	if randomMode {
+		var eligible []RoomInfo
+		for _, room := range rooms {
+			if room.Status == string(uno.StatusInProgress) && len(room.OpenSeats) > 0 {
+				eligible = append(eligible, room)
+			}
+		}
+		if len(eligible) > 0 {
+			pick := eligible[mathrand.IntN(len(eligible))]
+			seat := pick.OpenSeats[mathrand.IntN(len(pick.OpenSeats))]
+			writeLobbyJSON(w, http.StatusOK, matchmakeResponse{
+				MatchID:  pick.MatchID,
+				PlayerID: seat,
+				Created:  false,
+			})
+			return
+		}
+	}
+
 	var fallback *RoomInfo
 	for i := range rooms {
 		room := &rooms[i]

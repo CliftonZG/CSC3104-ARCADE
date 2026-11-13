@@ -59,36 +59,6 @@ func (k kube) pairPods(idx int) ([]pod, error) {
 	return list.Items, nil
 }
 
-// primaryOf finds whoever is primary RIGHT NOW (the role swaps after each failover).
-func (k kube) primaryOf(idx int) (string, error) {
-	pods, err := k.pairPods(idx)
-	if err != nil {
-		return "", err
-	}
-	var found []string
-	for _, p := range pods {
-		if p.role() == "primary" && !p.dying() {
-			found = append(found, p.name())
-		}
-	}
-	if len(found) != 1 {
-		return "", fmt.Errorf("pair %d: expected exactly one primary, found %v", idx, found)
-	}
-	return found[0], nil
-}
-
-// waitSettled blocks until the pair is healthy again: two pods, one primary, one backup.
-func (k kube) waitSettled(idx int, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if pods, err := k.pairPods(idx); err == nil && settled(pods) {
-			return nil
-		}
-		time.Sleep(time.Second)
-	}
-	return fmt.Errorf("pair %d did not settle within %s", idx, timeout)
-}
-
 func settled(pods []pod) bool {
 	if len(pods) != 2 {
 		return false

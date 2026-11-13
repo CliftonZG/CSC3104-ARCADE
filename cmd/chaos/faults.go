@@ -31,11 +31,14 @@ func (k kube) netFault(podName, image, script string) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err := f.WriteString(customProfile); err != nil {
+		_ = f.Close()
 		return time.Time{}, err
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		return time.Time{}, err
+	}
 
 	if _, err := k.kubectl("debug", podName, "--image="+image, "--target=gameserver",
 		"--container="+container, "--profile=netadmin", "--custom="+f.Name(),

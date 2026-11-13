@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -68,8 +70,35 @@ func (p *Proxy) HandleMatchmake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if r.Body != nil {
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+		_ = json.Unmarshal(body, &req)
+	}
+	randomMode := strings.EqualFold(req.Mode, "random") || strings.EqualFold(r.URL.Query().Get("mode"), "random")
+
 	rooms, err := p.fetchAllRooms(r.Context())
 	if err == nil {
+		if randomMode {
+			var eligible []RoomSummary
+			for _, room := range rooms {
+				if room.Status == "in_progress" && len(room.OpenSeats) > 0 {
+					eligible = append(eligible, room)
+				}
+			}
+			if len(eligible) > 0 {
+				pick := eligible[rand.IntN(len(eligible))]
+				seat := pick.OpenSeats[rand.IntN(len(pick.OpenSeats))]
+				writeJSON(w, http.StatusOK, map[string]any{
+					"match_id":  pick.MatchID,
+					"player_id": seat,
+					"created":   false,
+				})
+				return
+			}
+		}
 		var fallback *RoomSummary
 		for i := range rooms {
 			room := &rooms[i]

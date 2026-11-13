@@ -5,6 +5,7 @@
   const inputPlayer = document.getElementById('input-player');
   const roomsList = document.getElementById('rooms-list');
   const btnQuickMatch = document.getElementById('btn-quick-match');
+  const btnRandomMatch = document.getElementById('btn-random-match');
   const btnCreateRoom = document.getElementById('btn-create-room');
   const btnRefreshRooms = document.getElementById('btn-refresh-rooms');
 
@@ -102,13 +103,13 @@
     }
   }
 
-  async function quickMatch() {
-    btnQuickMatch.disabled = true;
+  async function matchmake(mode, triggerBtn) {
+    if (triggerBtn) triggerBtn.disabled = true;
     try {
       const resp = await fetch('/api/matchmake', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(mode ? { mode } : {}),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
@@ -117,10 +118,10 @@
       roomsList.textContent = '';
       const empty = document.createElement('p');
       empty.className = 'rooms-empty';
-      empty.textContent = `Quick Match failed: ${err.message}`;
+      empty.textContent = `Matchmaking failed: ${err.message}`;
       roomsList.appendChild(empty);
     } finally {
-      btnQuickMatch.disabled = false;
+      if (triggerBtn) triggerBtn.disabled = false;
     }
   }
 
@@ -146,7 +147,8 @@
     }
   }
 
-  if (btnQuickMatch) btnQuickMatch.addEventListener('click', quickMatch);
+  if (btnQuickMatch) btnQuickMatch.addEventListener('click', () => matchmake('', btnQuickMatch));
+  if (btnRandomMatch) btnRandomMatch.addEventListener('click', () => matchmake('random', btnRandomMatch));
   if (btnCreateRoom) btnCreateRoom.addEventListener('click', createNewRoom);
   if (btnRefreshRooms) btnRefreshRooms.addEventListener('click', refreshRooms);
 
