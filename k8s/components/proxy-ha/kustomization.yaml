@@ -1,0 +1,42 @@
+# Proxy without a single point of failure: 2 proxy replicas behind the
+# arcade-proxy Service instead of 1 (see README.md next to this file).
+# Enable it from an overlay:
+#   components:
+#     - ../../components/proxy-ha
+# or use the ready-made overlay:  kubectl apply -k k8s/overlays/ha-full
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - pdb.yaml
+
+patches:
+  - target:
+      kind: Deployment
+      name: arcade-proxy
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      # A rollout starts the new proxy before it stops an old one and never
+      # takes more than zero away early, so a rollout cannot empty the Service.
+      - op: add
+        path: /spec/strategy
+        value:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+      # Prefer different nodes, so one node failure does not take both proxies
+      # (soft, so a single-node cluster such as Docker Desktop still schedules both).
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: arcade-proxy

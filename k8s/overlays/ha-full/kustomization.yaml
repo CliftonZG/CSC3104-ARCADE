@@ -1,0 +1,10 @@
+# Demo with no single point of failure among the shared pieces: highly
+# available Redis (overlays/ha) plus 2 proxy replicas (components/proxy-ha).
+#   kubectl apply -k k8s/overlays/ha-full
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: arcade
+resources:
+  - ../ha
+components:
+  - ../../components/proxy-ha

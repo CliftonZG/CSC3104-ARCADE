@@ -131,5 +131,6 @@ The proxy Deployment already gets `GAMESERVER_SERVICE`, `GAMESERVER_SETS` and `G
 ## Known limitations
 
 - Redis is a single instance, so it's a single point of failure for replication. Redis Sentinel or Cluster would be the next step; all keys of a match already share one hash slot.
+- The base deployment runs one `arcade-proxy` pod, so the proxy is a single point of failure for connections. `kubectl apply -k k8s/overlays/ha-full` runs two (see `components/proxy-ha/README.md` for what that does and does not fix).
 - A standby currently idles until the failure detector (`pkg/detector`) lands. Its measured footprint is therefore a lower bound.
 - `ROLE` stays in each pod spec as the initial role. After a failover, the live role is the label and `/role`, not the StatefulSet the pod belongs to.

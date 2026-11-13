@@ -135,8 +135,12 @@ epochs are ignored; after `-max-outage` with no primary the client gets close `1
    re-send un-acked messages after a takeover.
 2. *Duplicates.* A queued message whose write to the dying primary failed may be replayed after it already
    arrived. Same fix (ids).
-3. *Proxy restart drops its clients' sockets.* Run several proxy replicas and drain one at a time
-   (`SIGTERM` closes clients with 1001).
+3. *A proxy restart or crash drops its clients' sockets.* No other proxy can take over an open
+   WebSocket. Run several replicas (`kubectl apply -k k8s/overlays/ha-full`, see
+   `k8s/components/proxy-ha/README.md`) so only the players on that proxy are affected, and let the
+   client reconnect: `cmd/cli -connect` does (it re-dials the same URL with backoff and the server
+   sends the current state again). On `SIGTERM` the proxy closes its clients with 1001, which a
+   client should treat as "reconnect".
 4. *No TLS to upstream, no `wss://` client.* Terminate TLS at the ingress/load balancer.
 5. The slow-primary case: if the new primary stalls while the proxy is replaying the queue, the next retarget
    waits up to `-write-timeout`.
