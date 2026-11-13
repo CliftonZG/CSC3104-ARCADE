@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARCADE — Distributed Multiplayer Uno</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Distributed Telemetry & Match HUD -->
+  <header class="hud">
+    <div class="hud-brand">
+      <span class="brand-badge">ARCADE</span>
+      <span class="brand-sub">Active-Replication Uno</span>
+    </div>
+
+    <div class="hud-telemetry" aria-label="Cluster and Match Status">
+      <div class="stat-pill">
+        <span id="conn-dot" class="status-dot disconnected" aria-hidden="true"></span>
+        <span id="conn-status">Disconnected</span>
+      </div>
+      <div class="stat-pill">
+        <span class="stat-label">Match</span>
+        <strong id="hud-match">—</strong>
+      </div>
+      <div class="stat-pill">
+        <span class="stat-label">Seat</span>
+        <strong id="hud-seat">—</strong>
+      </div>
+      <div class="stat-pill">
+        <span class="stat-label">Seq</span>
+        <strong id="hud-seq">0</strong>
+      </div>
+      <div class="stat-pill">
+        <span class="stat-label">RTT</span>
+        <strong id="hud-rtt">—</strong>
+      </div>
+    </div>
+
+    <div class="hud-controls">
+      <label class="bot-toggle" title="Automatically play turns for unoccupied/bot seats">
+        <input type="checkbox" id="auto-bots-toggle">
+        <span>Auto-Bots</span>
+      </label>
+      <button type="button" id="btn-step-bot" class="btn-secondary" title="Trigger one AI move for the current active player">
+        Step Bot
+      </button>
+      <button type="button" id="btn-open-lobby" class="btn-secondary">
+        Switch Seat
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Tabletop Arena -->
+  <main class="tabletop">
+    <!-- Opponents Row -->
+    <section class="opponents-row" aria-label="Opponents">
+      <div id="opponents-container" class="opponents-grid"></div>
+    </section>
+
+    <!-- Center Pile & Turn Controls -->
+    <section class="center-arena" aria-label="Table Center">
+      <div class="pile-group">
+        <button type="button" id="btn-draw" class="deck-pile" aria-label="Draw a card from the deck" disabled>
+          <div class="card card-back">
+            <div class="card-oval"><span class="uno-word">UNO</span></div>
+          </div>
+          <span class="pile-badge" id="deck-count">0</span>
+          <span class="pile-caption">Draw</span>
+        </button>
+
+        <div class="discard-slot">
+          <div id="discard-card" class="card-placeholder"></div>
+          <span class="pile-caption">Discard</span>
+        </div>
+      </div>
+
+      <div class="table-indicators">
+        <div class="color-indicator">
+          <span class="stat-label">Active Color</span>
+          <span id="active-color-badge" class="color-chip color-wild">—</span>
+        </div>
+        <div class="direction-indicator">
+          <span class="stat-label">Direction</span>
+          <span id="direction-badge" class="dir-chip">↻ Clockwise</span>
+        </div>
+        <button type="button" id="btn-pass" class="btn-primary" disabled>
+          Pass Turn
+        </button>
+      </div>
+    </section>
+
+    <!-- Local Player Hand -->
+    <section class="player-zone" aria-label="Your Hand">
+      <div class="turn-banner" id="turn-banner">
+        Connecting to match...
+      </div>
+      <div id="player-hand" class="hand-fan" role="list" aria-label="Cards in your hand"></div>
+    </section>
+  </main>
+
+  <!-- Join / Switch Seat Modal -->
+  <dialog id="lobby-dialog" aria-labelledby="lobby-title">
+    <h2 id="lobby-title">Join ARCADE Match</h2>
+    <p class="dialog-desc">Connect via the ARCADE proxy or gameserver WebSocket endpoint.</p>
+    <form id="lobby-form" method="dialog" class="lobby-form">
+      <label class="field">
+        <span>Match ID</span>
+        <input type="text" id="input-match" value="room0" required autofocus>
+      </label>
+      <label class="field">
+        <span>Player Seat</span>
+        <select id="input-player">
+          <option value="player1">player1 (Seat 1)</option>
+          <option value="player2">player2 (Seat 2)</option>
+          <option value="player3">player3 (Seat 3)</option>
+          <option value="player4">player4 (Seat 4)</option>
+        </select>
+      </label>
+      <label class="field checkbox-field">
+        <input type="checkbox" id="input-autobots" checked>
+        <span>Enable Auto-Bots (play solo against AI on other seats)</span>
+      </label>
+      <div class="dialog-actions">
+        <button type="submit" value="join" class="btn-primary">Join Match</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Wild Color Picker Modal -->
+  <dialog id="wild-dialog" aria-labelledby="wild-title">
+    <h2 id="wild-title">Choose Active Color</h2>
+    <div class="wild-grid">
+      <button type="button" class="wild-choice color-red" data-color="red" autofocus>Red</button>
+      <button type="button" class="wild-choice color-yellow" data-color="yellow">Yellow</button>
+      <button type="button" class="wild-choice color-green" data-color="green">Green</button>
+      <button type="button" class="wild-choice color-blue" data-color="blue">Blue</button>
+    </div>
+    <form method="dialog" class="dialog-actions">
+      <button value="cancel" class="btn-secondary">Cancel</button>
+    </form>
+  </dialog>
+
+  <!-- Game Over Modal -->
+  <dialog id="gameover-dialog" aria-labelledby="gameover-title">
+    <h2 id="gameover-title">Match Finished</h2>
+    <p id="gameover-message" class="dialog-desc"></p>
+    <div class="dialog-actions">
+      <form method="dialog">
+        <button value="close" class="btn-primary" autofocus>Close</button>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Accessible Toast Notifications Region & Screen Reader Fallback -->
+  <div id="toast-region" role="region" aria-label="Game Notifications" class="toast-stack"></div>
+  <div id="sr-announcements" class="visually-hidden" aria-live="assertive"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

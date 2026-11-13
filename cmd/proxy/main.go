@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/CSC3104-ARCADE/pkg/proxy"
+	"github.com/CSC3104-ARCADE/pkg/webui"
 )
 
 // listFlag is a flag that can be given several times.
@@ -234,6 +235,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 
 	mux := http.NewServeMux()
+	mux.Handle("/", webui.Handler())
 	mux.Handle("/ws", p)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	clientSrv := &http.Server{Addr: o.listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}

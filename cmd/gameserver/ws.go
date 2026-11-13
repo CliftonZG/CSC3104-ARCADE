@@ -106,7 +106,8 @@ func (ws *GameServerWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if env.Type == protocol.TypeActionRequest {
+		switch env.Type {
+		case protocol.TypeActionRequest:
 			var act uno.Action
 			if err := json.Unmarshal(env.Payload, &act); err == nil {
 				act.PlayerID = playerID
@@ -117,7 +118,43 @@ func (ws *GameServerWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					// State broadcast is automatically triggered via session's MoveHook
 				}
 			}
+		case protocol.TypeBotStep:
+			ws.stepBot(playerID)
 		}
+	}
+}
+
+// stepBot executes one legal move for the current player, provided the current
+// player is not the requesting human seat.
+func (ws *GameServerWS) stepBot(requestingPlayer string) {
+	if ws.session == nil {
+		return
+	}
+	st := ws.session.State()
+	if st == nil || st.Status == uno.StatusFinished {
+		return
+	}
+	cur := st.CurrentPlayer()
+	if cur == "" || cur == requestingPlayer {
+		return
+	}
+	for idx, c := range st.Hands[cur] {
+		if uno.IsPlayable(st, cur, c) {
+			var col uno.Colour
+			if c.IsWild() {
+				col = uno.ColourRed
+			}
+			_, _ = ws.session.ApplyAction(uno.Action{
+				Type:           uno.ActionPlay,
+				PlayerID:       cur,
+				CardIndex:      idx,
+				DeclaredColour: col,
+			})
+			return
+		}
+	}
+	if _, err := ws.session.ApplyAction(uno.Action{Type: uno.ActionDraw, PlayerID: cur}); err != nil {
+		_, _ = ws.session.ApplyAction(uno.Action{Type: uno.ActionPass, PlayerID: cur})
 	}
 }
 

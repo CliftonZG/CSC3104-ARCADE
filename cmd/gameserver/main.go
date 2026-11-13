@@ -19,6 +19,7 @@ import (
 	"github.com/CSC3104-ARCADE/pkg/metrics"
 	"github.com/CSC3104-ARCADE/pkg/replication"
 	"github.com/CSC3104-ARCADE/pkg/uno"
+	"github.com/CSC3104-ARCADE/pkg/webui"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -163,6 +164,7 @@ func main() {
 
 	// Setup HTTP server for Prometheus metrics (/metrics), Health (/healthz), and Profiling (/debug/pprof)
 	mux := http.DefaultServeMux
+	mux.Handle("/", webui.Handler())
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
