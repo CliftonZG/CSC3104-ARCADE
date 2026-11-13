@@ -18,6 +18,7 @@ resources:
   - gameserver-a.yaml
   - gameserver-b.yaml
   - proxy.yaml
+  - proxy-hpa.yaml
 
 configMapGenerator:
   # Shared gameserver settings. Kustomize appends a content hash to the name,

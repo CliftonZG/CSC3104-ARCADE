@@ -1,0 +1,27 @@
+# Autoscales the stateless WebSocket ingress proxy based on CPU utilization.
+# Stateful game server pairs (arcade-gs-a and arcade-gs-b) must scale in
+# lockstep by ordinal via scripts/scale_pairs.sh so every primary has a standby.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: arcade-proxy
+  labels:
+    app.kubernetes.io/name: arcade-proxy
+    app.kubernetes.io/component: ingress
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: arcade-proxy
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60
