@@ -1,0 +1,34 @@
+# Headless Service: gives every Redis pod a stable DNS name
+# (arcade-redis-<i>.arcade-redis-headless), which Sentinels, replicas and
+# gameservers use instead of pod IPs. publishNotReadyAddresses lets a starting
+# pod reach the Sentinels of the others before it is Ready itself.
+apiVersion: v1
+kind: Service
+metadata:
+  name: arcade-redis-headless
+  labels:
+    app.kubernetes.io/name: arcade-redis
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: arcade-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+    - name: sentinel
+      port: 26379
+      targetPort: sentinel
+---
+# Voluntary disruptions (node drain, upgrade) take down at most one Redis pod
+# at a time, so a primary plus a replica, and a Sentinel quorum of 2, remain.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: arcade-redis
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: arcade-redis

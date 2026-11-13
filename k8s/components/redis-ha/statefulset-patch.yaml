@@ -1,0 +1,103 @@
+# Turns the single Redis of k8s/base into three pods. Each pod runs Redis and
+# a Sentinel; an init container decides whether the pod starts as primary or
+# replica (scripts/init.sh).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: arcade-redis
+spec:
+  replicas: 3
+  # Pod DNS names need a headless governing Service. serviceName cannot be
+  # changed on an existing StatefulSet: delete the old one first (see README).
+  serviceName: arcade-redis-headless
+  # Start all three at once; init.sh makes pod 0 the primary of a new cluster
+  # even when the others start first. (Also immutable, see above.)
+  podManagementPolicy: Parallel
+  template:
+    spec:
+      affinity:
+        # Prefer one Redis pod per node, so a node failure costs one copy.
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: arcade-redis
+      initContainers:
+        - name: config
+          image: redis:7.4-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "/scripts/init.sh"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MASTER_NAME
+              value: arcade
+            - name: HEADLESS_SERVICE
+              value: arcade-redis-headless
+            - name: REPLICAS
+              value: "3"
+            # Sentinel declares the primary down after this long without a
+            # reply; with the gameserver's 3 s write retry a failover must
+            # finish well inside 3 s.
+            - name: DOWN_AFTER_MS
+              value: "1000"
+            - name: FAILOVER_TIMEOUT_MS
+              value: "5000"
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: conf
+              mountPath: /conf
+      containers:
+        - name: redis
+          # The image's entrypoint turns "<file>.conf" into
+          # "redis-server <file>.conf" and drops to the redis user.
+          args: ["/conf/redis.conf"]
+          volumeMounts:
+            - name: conf
+              mountPath: /conf
+        - name: sentinel
+          image: redis:7.4-alpine
+          imagePullPolicy: IfNotPresent
+          args: ["/conf/sentinel.conf", "--sentinel"]
+          ports:
+            - name: sentinel
+              containerPort: 26379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "-p", "26379", "ping"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "-p", "26379", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 20m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: conf
+              mountPath: /conf
+      volumes:
+        - name: scripts
+          configMap:
+            name: arcade-redis-ha-scripts
+        - name: conf
+          emptyDir: {}
