@@ -21,6 +21,12 @@ var (
 
 	// ErrUnknownFormat is returned for a snapshot format other than JSON or binary.
 	ErrUnknownFormat = errors.New("replication: unknown snapshot format")
+
+	// ErrNotReplicated is returned when a Store configured WithReplicaAcks
+	// applied a write on the Redis primary but fewer replicas than required
+	// acknowledged it in time. The write may be lost if Redis fails over, so
+	// the caller must not treat it as committed (or, for a claim, act as primary).
+	ErrNotReplicated = errors.New("replication: write not acknowledged by enough Redis replicas")
 )
 
 // FencedError carries the epoch the caller held and the epoch Redis holds.

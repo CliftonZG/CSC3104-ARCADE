@@ -13,11 +13,11 @@ import (
 // Redis is usually not ready for the first few seconds; exiting immediately
 // would push the primaries into CrashLoopBackOff, whose exponential back-off
 // then delays every later restart (including real failure recovery).
-func connectStoreWithRetry(ctx context.Context, addr string, wait time.Duration) (*replication.Store, error) {
+func connectStoreWithRetry(ctx context.Context, cfg redisConfig, wait time.Duration) (*replication.Store, error) {
 	deadline := time.Now().Add(wait)
 	backoff := 250 * time.Millisecond
 	for attempt := 1; ; attempt++ {
-		store, err := connectStore(ctx, addr)
+		store, err := connectStore(ctx, cfg)
 		if err == nil {
 			return store, nil
 		}

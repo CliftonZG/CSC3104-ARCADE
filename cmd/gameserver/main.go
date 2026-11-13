@@ -9,6 +9,7 @@ import (
 	_ "net/http/pprof" // Registers /debug/pprof handlers for CPU/heap profiling
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -27,6 +28,11 @@ func main() {
 	seed := flag.Int64("seed", 42, "initial shuffle seed")
 	httpPort := flag.Int("http", 8081, "HTTP port for metrics, health, and pprof")
 	redisAddr := flag.String("redis", "", "Redis address for snapshot replication (empty disables replication)")
+	redisSentinels := flag.String("redis-sentinels", "", "comma-separated Redis Sentinel addresses; overrides -redis with a highly available primary/replica group")
+	redisMaster := flag.String("redis-master", "arcade", "Redis Sentinel master name")
+	redisAcks := flag.Int("redis-acks", 0, "replicas that must acknowledge every epoch claim and snapshot (Redis WAIT); 0 disables")
+	redisAckTimeout := flag.Duration("redis-ack-timeout", 250*time.Millisecond, "how long to wait for -redis-acks replicas")
+	redisWriteTimeout := flag.Duration("redis-write-timeout", 0, "how long a move's snapshot commit is retried (0: 3s with Sentinel, else 500ms)")
 	snapshotFormat := flag.String("snapshot-format", "json", "replicated snapshot encoding: json or binary")
 	autoplay := flag.Duration("autoplay", 0, "if > 0, the primary self-plays one synthetic move per interval (load testing)")
 	flag.Parse()
@@ -41,6 +47,21 @@ func main() {
 	if envRedis := os.Getenv("REDIS_ADDR"); envRedis != "" {
 		*redisAddr = envRedis
 	}
+	if env := os.Getenv("REDIS_SENTINELS"); env != "" {
+		*redisSentinels = env
+	}
+	if env := os.Getenv("REDIS_MASTER_NAME"); env != "" {
+		*redisMaster = env
+	}
+	if env := os.Getenv("REDIS_MIN_REPLICA_ACKS"); env != "" {
+		n, perr := strconv.Atoi(env)
+		if perr != nil {
+			log.Fatalf("[GAMESERVER] invalid REDIS_MIN_REPLICA_ACKS %q: %v", env, perr)
+		}
+		*redisAcks = n
+	}
+	redisCfg := redisConfig{Addr: *redisAddr, Sentinels: splitAddrs(*redisSentinels), MasterName: *redisMaster,
+		MinAcks: *redisAcks, AckTimeout: *redisAckTimeout, WriteTimeout: *redisWriteTimeout}
 	if envAutoplay := os.Getenv("AUTOPLAY_INTERVAL"); envAutoplay != "" {
 		d, perr := time.ParseDuration(envAutoplay)
 		if perr != nil {
@@ -75,9 +96,9 @@ func main() {
 	var engine *uno.Game
 	var store *replication.Store
 
-	// Connect to Redis for both Primary and Standby pods if redisAddr is provided
-	if *redisAddr != "" {
-		store, err = connectStoreWithRetry(ctx, *redisAddr, 60*time.Second)
+	// Connect to Redis for both Primary and Standby pods if Redis is configured
+	if redisCfg.enabled() {
+		store, err = connectStoreWithRetry(ctx, redisCfg, 60*time.Second)
 		if err != nil {
 			log.Fatalf("[GAMESERVER] Failed to connect to Redis: %v", err)
 		}
@@ -106,7 +127,7 @@ func main() {
 		}
 	default:
 		// Standby: promotion (store.TakeOver) is driven by the failure detector.
-		log.Printf("[GAMESERVER] Standby for match=%s; replication source redis=%s", *matchID, *redisAddr)
+		log.Printf("[GAMESERVER] Standby for match=%s; replication source redis=%s", *matchID, redisCfg)
 		engine, err = newGame()
 	}
 	if err != nil {

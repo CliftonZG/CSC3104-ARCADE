@@ -57,11 +57,52 @@ run, so a fenced move is already applied in the stale primary's memory. The pod
 must stop serving on `OnFenced` (the gameserver shuts down). `ApplyAction`'s
 error wraps `replication.ErrFenced` (`errors.Is` works).
 
+## High availability: Redis Sentinel
+
+A single Redis is a single point of failure, so production runs a Sentinel
+group: one Redis primary, replicas, and three Sentinels that promote a replica
+when the primary dies. The gameserver connects through the Sentinels and
+follows the new primary automatically:
+
+```bash
+scripts/redis-ha-local.sh up        # primary :6390, replicas :6391 :6392, sentinels :26390-26392
+go run ./cmd/gameserver -role primary -match m1 -autoplay 500ms   -redis-sentinels 127.0.0.1:26390,127.0.0.1:26391,127.0.0.1:26392 -redis-acks 1
+scripts/redis-ha-local.sh kill      # kill -9 the Redis primary; the game pauses ~2s, then continues
+```
+
+| Flag / env | Meaning |
+|---|---|
+| `-redis-sentinels` / `REDIS_SENTINELS` | Sentinel addresses (overrides `-redis`) |
+| `-redis-master` / `REDIS_MASTER_NAME` | Sentinel master name (default `arcade`) |
+| `-redis-acks` / `REDIS_MIN_REPLICA_ACKS` | replicas that must confirm every claim and commit (`WAIT`) |
+| `-redis-ack-timeout` | how long to wait for them (default 250ms) |
+| `-redis-write-timeout` | how long a move's commit is retried (default 3s with Sentinel, else 500ms) |
+
+**Why the acks matter for fencing.** Redis replicates asynchronously. Without
+`WAIT`, Sentinel could promote a replica that never received the latest
+`claim.lua`: the epoch would go backwards and a fenced primary could write
+again. With `WithReplicaAcks(1, ...)` a claim or commit only succeeds once a
+replica has it, and Sentinel promotes the most up-to-date replica, so the
+epoch and every acknowledged move survive a Redis failover. Without enough
+replicas it fails with `ErrNotReplicated` (consistency over availability);
+with two replicas and `acks=1`, one replica can be down. The Redis nodes also
+run `min-replicas-to-write 1`, so an old Redis primary cut off from its
+replicas stops accepting writes.
+
+The Replicator retries transient errors (failover in progress, replica not yet
+caught up) until its write timeout; retries are idempotent (`DUP`). Fencing and
+stale sequences are never retried.
+
+**WSL note:** WSL2's default `tsc` clock can jump backwards, which puts Sentinel
+into TILT mode (no failovers for 30s). Fix until the next WSL restart:
+`wsl -u root -e sh -c "echo hyperv_clocksource_tsc_page > /sys/devices/system/clocksource/clocksource0/current_clocksource"`
+
 ## Tests
 
 ```bash
 go test ./pkg/replication/                                   # in-memory Redis (miniredis)
-REDIS_TEST_ADDR=localhost:6379 go test ./pkg/replication/    # real Redis 7+
+REDIS_TEST_ADDR=localhost:6379 go test ./pkg/replication/    # real Redis 7+ (standalone)
+REDIS_SENTINEL_ADDRS=127.0.0.1:26390,127.0.0.1:26391,127.0.0.1:26392   go test -run Sentinel ./pkg/replication/                   # forces a real Sentinel failover
 ```
 `fencing_test.go` holds the Phase 2 split-brain validation: partitioned
 primary wakes up and keeps committing, higher-seq stale writes, double takeover,
