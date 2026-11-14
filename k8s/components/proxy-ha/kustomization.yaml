@@ -40,3 +40,13 @@ patches:
                   labelSelector:
                     matchLabels:
                       app.kubernetes.io/name: arcade-proxy
+  # The base HPA (k8s/base/proxy-hpa.yaml) has minReplicas 1 and would
+  # otherwise scale the proxy back down to 1 when CPU is low, undoing this
+  # component. Keep at least 2.
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: arcade-proxy
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 2
