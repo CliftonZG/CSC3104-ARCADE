@@ -19,6 +19,10 @@ import (
 	"github.com/CSC3104-ARCADE/pkg/uno"
 )
 
+// peerResolveInterval is how often the partner pod's DNS name is looked up
+// again, so heartbeats follow the partner to its new IP after a restart.
+const peerResolveInterval = time.Second
+
 // Config configures the failure detector.
 type Config struct {
 	Identity               fleet.Identity
@@ -148,11 +152,13 @@ func (d *Detector) transmitLoop(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	peerAddr, err := net.ResolveUDPAddr("udp", peerAddrStr)
-	if err != nil {
-		d.logf("[DETECTOR] Failed to resolve peer addr: %v", err)
-		return
-	}
+	// The partner's address is looked up again every peerResolveInterval, not
+	// once at start-up: when Kubernetes recreates the partner pod it gets a new
+	// IP behind the same DNS name, and heartbeats sent to the old IP would never
+	// arrive. A partner that does not exist yet is retried rather than given up.
+	var peerAddr *net.UDPAddr
+	var lastResolve time.Time
+	loggedFailure := false
 
 	for {
 		select {
@@ -161,6 +167,24 @@ func (d *Detector) transmitLoop(ctx context.Context) {
 		case <-d.stopCh:
 			return
 		case <-ticker.C:
+			if peerAddr == nil || time.Since(lastResolve) >= peerResolveInterval {
+				lastResolve = time.Now()
+				addr, err := net.ResolveUDPAddr("udp", peerAddrStr)
+				switch {
+				case err == nil:
+					if peerAddr != nil && !addr.IP.Equal(peerAddr.IP) {
+						d.logf("[DETECTOR] Partner address changed: %s -> %s", peerAddr, addr)
+					}
+					peerAddr = addr
+					loggedFailure = false
+				case !loggedFailure:
+					d.logf("[DETECTOR] Cannot resolve partner %s yet: %v (retrying)", peerAddrStr, err)
+					loggedFailure = true
+				}
+			}
+			if peerAddr == nil {
+				continue
+			}
 			info := d.cfg.Status.Info()
 			pkt := HeartbeatPacket{
 				MatchID:   d.cfg.Identity.MatchID,
