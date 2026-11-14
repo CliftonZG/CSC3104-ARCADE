@@ -1,0 +1,6 @@
+"Run","Killed","Clients","Sent","Unanswered","Disconnects","LongestReplyGap"
+"1","arcade-gs-b-0","20","5980","40","0","548ms"
+"2","arcade-gs-a-0","20","5980","391","0","3.427s"
+"3","arcade-gs-a-0","20","5979","260","0","346ms"
+"4","arcade-gs-b-0","20","5080","2980","20","133ms"
+"5","","20","2983","2983","20","0s"

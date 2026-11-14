@@ -155,10 +155,12 @@ func (d *Detector) transmitLoop(ctx context.Context) {
 	// The partner's address is looked up again every peerResolveInterval, not
 	// once at start-up: when Kubernetes recreates the partner pod it gets a new
 	// IP behind the same DNS name, and heartbeats sent to the old IP would never
-	// arrive. A partner that does not exist yet is retried rather than given up.
-	var peerAddr *net.UDPAddr
-	var lastResolve time.Time
-	loggedFailure := false
+	// arrive. The lookup runs in its own goroutine so a slow or lost DNS reply
+	// (seconds under packet loss) never delays a heartbeat.
+	var peerAddr atomic.Pointer[net.UDPAddr]
+	resolveCtx, stopResolve := context.WithCancel(ctx)
+	defer stopResolve()
+	go d.resolvePeerLoop(resolveCtx, peerAddrStr, &peerAddr)
 
 	for {
 		select {
@@ -167,22 +169,8 @@ func (d *Detector) transmitLoop(ctx context.Context) {
 		case <-d.stopCh:
 			return
 		case <-ticker.C:
-			if peerAddr == nil || time.Since(lastResolve) >= peerResolveInterval {
-				lastResolve = time.Now()
-				addr, err := net.ResolveUDPAddr("udp", peerAddrStr)
-				switch {
-				case err == nil:
-					if peerAddr != nil && !addr.IP.Equal(peerAddr.IP) {
-						d.logf("[DETECTOR] Partner address changed: %s -> %s", peerAddr, addr)
-					}
-					peerAddr = addr
-					loggedFailure = false
-				case !loggedFailure:
-					d.logf("[DETECTOR] Cannot resolve partner %s yet: %v (retrying)", peerAddrStr, err)
-					loggedFailure = true
-				}
-			}
-			if peerAddr == nil {
+			addr := peerAddr.Load()
+			if addr == nil {
 				continue
 			}
 			info := d.cfg.Status.Info()
@@ -196,8 +184,42 @@ func (d *Detector) transmitLoop(ctx context.Context) {
 
 			data, err := encodePacket(pkt)
 			if err == nil {
-				_, _ = d.udpConn.WriteToUDP(data, peerAddr)
+				_, _ = d.udpConn.WriteToUDP(data, addr)
 			}
+		}
+	}
+}
+
+// resolvePeerLoop keeps addr pointing at the partner's current IP. It looks the
+// name up immediately, then every peerResolveInterval; until the first success
+// it retries quickly. Failures keep the last known address.
+func (d *Detector) resolvePeerLoop(ctx context.Context, name string, addr *atomic.Pointer[net.UDPAddr]) {
+	loggedFailure := false
+	for {
+		next := peerResolveInterval
+		a, err := net.ResolveUDPAddr("udp", name)
+		switch {
+		case err == nil:
+			if old := addr.Load(); old != nil && !old.IP.Equal(a.IP) {
+				d.logf("[DETECTOR] Partner address changed: %s -> %s", old, a)
+			}
+			addr.Store(a)
+			loggedFailure = false
+		default:
+			if !loggedFailure {
+				d.logf("[DETECTOR] Cannot resolve partner %s yet: %v (retrying)", name, err)
+				loggedFailure = true
+			}
+			if addr.Load() == nil {
+				next = d.cfg.HeartbeatInterval
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.stopCh:
+			return
+		case <-time.After(next):
 		}
 	}
 }
