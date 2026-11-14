@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -15,23 +16,42 @@ import (
 	"github.com/coder/websocket"
 )
 
+// runRemoteClient joins a match through a proxy (or a gameserver) and plays it.
+// If the connection is lost, for example because the proxy it went through
+// crashed, it reconnects to the same URL by itself (see reconnect.go) and the
+// server replays the current match state; the player does not have to restart
+// the client. The player is identified by the URL (?player=<id>), so keep it
+// the same.
 func runRemoteClient(ctx context.Context, wsURL string, playerID string) error {
 	fmt.Printf("%s[REMOTE]%s Dialing backend WebSocket at: %s (player: %s)\n", ansiBold, ansiReset, wsURL, playerID)
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		return fmt.Errorf("connect error: %w", err)
-	}
-	defer func() { _ = conn.CloseNow() }()
-
-	fmt.Printf("%s[REMOTE]%s Connected! Waiting for match state from gameserver...\n", ansiGreen, ansiReset)
-
 	reader := bufio.NewReader(os.Stdin)
 
+	dial := func(ctx context.Context) (*websocket.Conn, *http.Response, error) {
+		dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		conn, resp, err := websocket.Dial(dctx, wsURL, nil)
+		if err == nil {
+			fmt.Printf("%s[REMOTE]%s Connected! Waiting for match state from gameserver...\n", ansiGreen, ansiReset)
+		}
+		return conn, resp, err
+	}
+	play := func(ctx context.Context, conn *websocket.Conn) error {
+		return playRemote(ctx, conn, reader, playerID)
+	}
+	logf := func(format string, args ...any) {
+		fmt.Printf("%s[REMOTE]%s %s\n", ansiYellow, ansiReset, fmt.Sprintf(format, args...))
+	}
+	return reconnectLoop(ctx, defaultRetry, dial, play, logf, sleepCtx)
+}
+
+// playRemote reads server messages on one connection until it breaks and
+// returns the error that ended it.
+func playRemote(ctx context.Context, conn *websocket.Conn, reader *bufio.Reader, playerID string) error {
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
-			return fmt.Errorf("connection closed by server: %w", err)
+			return err
 		}
 
 		var env protocol.Envelope
