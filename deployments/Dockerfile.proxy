@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1
 #
 # ARCADE client-facing WebSocket proxy
-# Owner: Tan Yan Ting (container images & Kubernetes fleet)
 #
 # Build (from repo root):
 #   docker build -f deployments/Dockerfile.proxy -t arcade/proxy:dev .

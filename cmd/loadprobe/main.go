@@ -2,8 +2,6 @@
 // Primary/Standby pair in the ARCADE fleet, plus throughput and latency,
 // over a fixed measurement window.
 //
-// Owner: Tan Yan Ting (Phase 2: horizontal scalability & resource profiling).
-//
 // It runs inside the cluster as a Kubernetes Job (k8s/load/loadprobe-job.yaml)
 // and reaches each gameserver through its stable headless-Service DNS name,
 // so it needs no kubectl, port-forwarding or metrics-server. For each pod it

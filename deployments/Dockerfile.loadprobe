@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1
 #
 # ARCADE load-test probe (Phase 2 resource profiling)
-# Owner: Tan Yan Ting (container images & Kubernetes fleet)
 #
 # Build (from repo root):
 #   docker build -f deployments/Dockerfile.loadprobe -t arcade/loadprobe:dev .

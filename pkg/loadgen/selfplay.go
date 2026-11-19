@@ -2,8 +2,6 @@
 // the fleet can be load-tested and profiled before (and independently of)
 // the WebSocket proxy.
 //
-// Owner: Tan Yan Ting (Phase 2: horizontal scalability & resource profiling).
-//
 // Each move goes through Game.ApplyAction exactly like a client move would,
 // so every registered MoveHook runs: the Redis replication hook (snapshot +
 // Lua-fenced commit), the metrics hook, and anything added later. The cost

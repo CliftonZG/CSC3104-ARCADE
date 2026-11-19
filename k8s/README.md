@@ -1,6 +1,6 @@
 # ARCADE on Kubernetes: fleet layout, role assignment & service discovery
 
-Owner: **Tan Yan Ting** (Phase 1: Kubernetes orchestration & fleet lifecycle)
+Owner of This: **Tan Yan Ting** (Phase 1: Kubernetes orchestration & fleet lifecycle)
 
 ```
  clients ──WebSocket──▶ arcade-proxy   (Deployment, LoadBalancer :8080)
