@@ -2,7 +2,6 @@
 // fleet: which match it serves, which pod is its Primary/Standby partner,
 // what role it starts in, and how other components reach it.
 //
-//
 // Topology (go to k8s/README.md):
 //
 //	StatefulSet arcade-gs-a  (ROLE=primary)   arcade-gs-a-0  arcade-gs-a-1 ... arcade-gs-a-(N-1)
