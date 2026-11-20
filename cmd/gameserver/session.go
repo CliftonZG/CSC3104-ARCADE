@@ -19,6 +19,7 @@ type EngineSession interface {
 	ActiveGame() *uno.Game
 	SwapGame(newGame *uno.Game)
 	RegisterHook(hook uno.MoveHook)
+	SetReplicatorHook(hook uno.MoveHook)
 }
 
 // GameSession provides a thread-safe, decoupled implementation of EngineSession.
@@ -29,6 +30,7 @@ type GameSession struct {
 	game    *uno.Game
 	matchID string
 	hooks   []uno.MoveHook
+	repHook uno.MoveHook
 }
 
 // NewGameSession initializes a session with an active game instance.
@@ -54,8 +56,19 @@ func (s *GameSession) RegisterHook(hook uno.MoveHook) {
 	}
 }
 
+// SetReplicatorHook sets the single active replication MoveHook, replacing any
+// prior epoch's replicator hook so stale hooks are never re-attached on takeover.
+func (s *GameSession) SetReplicatorHook(hook uno.MoveHook) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.repHook = hook
+	if s.game != nil && hook != nil {
+		s.game.RegisterHook(hook)
+	}
+}
+
 // SwapGame safely hot-swaps the underlying engine (e.g. after Standby promotion and snapshot restore)
-// and re-attaches all registered persistent hooks atomically.
+// and re-attaches all registered persistent hooks and the active replicator hook atomically.
 func (s *GameSession) SwapGame(newGame *uno.Game) {
 	if newGame == nil {
 		return
@@ -66,6 +79,9 @@ func (s *GameSession) SwapGame(newGame *uno.Game) {
 	s.matchID = newGame.MatchID()
 	for _, h := range s.hooks {
 		s.game.RegisterHook(h)
+	}
+	if s.repHook != nil {
+		s.game.RegisterHook(s.repHook)
 	}
 }
 

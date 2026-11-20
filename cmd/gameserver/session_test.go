@@ -120,3 +120,44 @@ func TestGameServerWSMultiRoomAndReset(t *testing.T) {
 		t.Fatalf("expected room1 sequence 0 after reset, got %d", ws.getOrCreateSession("room1").Sequence())
 	}
 }
+
+func TestGameSessionReplicatorHookReplacedOnSwap(t *testing.T) {
+	game1, err := uno.NewGameEngine("rep-match", []string{"p1", "p2"}, 11)
+	if err != nil {
+		t.Fatalf("failed to create game1: %v", err)
+	}
+	session := NewGameSession(game1)
+
+	var firstRepCalls, secondRepCalls atomic.Int32
+	session.SetReplicatorHook(func(prev, next *uno.State, summary uno.ActionSummary) error {
+		firstRepCalls.Add(1)
+		return nil
+	})
+
+	if _, err := session.ApplyAction(uno.Action{Type: uno.ActionDraw, PlayerID: session.State().CurrentPlayer()}); err != nil {
+		t.Fatalf("first ApplyAction failed: %v", err)
+	}
+	if firstRepCalls.Load() != 1 {
+		t.Fatalf("expected first replicator called once, got %d", firstRepCalls.Load())
+	}
+
+	game2, err := uno.NewGameEngine("rep-match", []string{"p1", "p2"}, 22)
+	if err != nil {
+		t.Fatalf("failed to create game2: %v", err)
+	}
+	session.SetReplicatorHook(func(prev, next *uno.State, summary uno.ActionSummary) error {
+		secondRepCalls.Add(1)
+		return nil
+	})
+	session.SwapGame(game2)
+
+	if _, err := session.ApplyAction(uno.Action{Type: uno.ActionDraw, PlayerID: session.State().CurrentPlayer()}); err != nil {
+		t.Fatalf("second ApplyAction failed: %v", err)
+	}
+	if firstRepCalls.Load() != 1 {
+		t.Fatalf("stale replicator should not run after replacement, got %d calls", firstRepCalls.Load())
+	}
+	if secondRepCalls.Load() != 1 {
+		t.Fatalf("expected active replicator called once, got %d", secondRepCalls.Load())
+	}
+}

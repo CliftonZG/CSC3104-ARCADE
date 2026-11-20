@@ -221,23 +221,23 @@ func main() {
 			ProxyAdminToken: os.Getenv("ARCADE_ADMIN_TOKEN"),
 			OnTakeover: func(epoch int64, newGame *uno.Game) {
 				log.Printf("[TAKEOVER] Standby successfully promoted to Primary at Epoch=%d", epoch)
-				if newGame != nil {
-					session.SwapGame(newGame)
-				}
-				// Hook replication for subsequent primary moves
-				// Self-play (if enabled) continues on the promoted pod; it stops
-				// again if this pod is fenced by a newer primary.
 				driverCtx, stopDriver := context.WithCancel(ctx)
 				rep := replication.NewReplicator(store, replication.ReplicatorConfig{
 					MatchID: identity.MatchID,
 					Epoch:   epoch,
 					Format:  replication.Format(*snapshotFormat),
 					OnFenced: func(fe *replication.FencedError) {
+						if status.Info().Epoch != epoch {
+							return
+						}
 						stopDriver()
 						status.Demote()
 					},
 				})
-				session.RegisterHook(rep.Hook())
+				session.SetReplicatorHook(rep.Hook())
+				if newGame != nil {
+					session.SwapGame(newGame)
+				}
 				if *autoplay > 0 {
 					driver := &loadgen.Driver{Game: session.ActiveGame(), Interval: *autoplay,
 						Policy: loadgen.Policy{Endless: true}, MaxHookFailures: 100, Logf: log.Printf}
